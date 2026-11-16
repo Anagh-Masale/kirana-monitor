@@ -1,0 +1,24 @@
+name = "kirana-monitor"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# Dashboard yahan khulega
+routes = [{ pattern = "track.anaghmasale.com", custom_domain = true }]
+
+[triggers]
+crons = ["*/30 * * * *"]   # har 30 minute
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kirana-monitor"
+database_id = "ffaa57f3-e16c-41d4-9182-59bd1c2e6a72"
+
+[vars]
+MAIL_FROM = "Kirana Monitor <noreply@anaghmasale.com>"
+EMAIL_MODE = "always"        # "always" = har check par mail, "changes" = sirf change par
+DASHBOARD_URL = "https://track.anaghmasale.com"
+GH_REPO = "Anagh-Masale/kirana-monitor"   # aapka GitHub repo (owner/name)
+DEMO = "0"
+
+# Secrets (npx wrangler secret put NAME):
+#   MAIL_TO, RESEND_API_KEY, DASH_PASSWORD, INGEST_KEY, GH_TOKEN
