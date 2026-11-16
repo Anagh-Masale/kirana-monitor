@@ -59,7 +59,9 @@ def to_storage_state(raw):
             if "=" not in part:
                 continue
             n, v = part.strip().split("=", 1)
-            host_only = n.startswith("__Host-")
+            # Portal par next-auth cookies sirf supplier.kirana.club ki hoti hain (host-only),
+            # baaki login cookies .kirana.club ki. Galat domain se refresh ke baad duplicate cookie banti.
+            host_only = n.startswith("__Host-") or "next-auth" in n or n == "colorPref"
             domain = SITE.split("//")[1].split("/")[0] if host_only else COOKIE_DOMAIN
             secure = SITE.startswith("https")
             cookies.append({
