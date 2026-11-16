@@ -182,7 +182,7 @@ async function testPush(){unlockAudio();$("pushState").textContent="Test bhej ra
 if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").then(async()=>{
  if("Notification" in window&&Notification.permission==="granted"){const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();if(sub){saveSub(sub);setOn();}}
 });
- navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="kc-notify"){const n=e.data.n;toast(n.title,n.body,n.kind==="order");}});}
+ navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="kc-notify"){const n=e.data.n;if(n.kind!=="quiet")toast(n.title,n.body,n.kind==="order");}});}
 let shownByPush=0;
 setInterval(async()=>{try{const j=await (await fetch("/api/data",{cache:"no-store"})).json();
  const evId=(j.lastEvent&&j.lastEvent.id)||0, runTs=(j.lastRun&&j.lastRun.ts)||0;
@@ -252,7 +252,7 @@ export function dashboardPage(d, env) {
   </header>
   <div class="meta">
     <span>Last check <b>${lr ? `${fmtTime(lr.ts)}` : "–"}</b>${lr ? ` (${ago(lr.ts, d.now)})` : ""}</span>
-    <span>Har <b>30 min</b> auto-check</span>
+    <span>Har <b>30 min</b> auto-check · raat 12–7:30 band</span>
     <span>24 ghante mein <b>${d.runs24h.ok}/${d.runs24h.total}</b> checks successful</span>
   </div>
   <div class="card pushbar">
@@ -277,7 +277,6 @@ export function dashboardPage(d, env) {
       </section>
     </div>
   </div>
-  ${cleanupSection(d)}
   <footer>
     ${d.demo ? `<form method="post" action="/reset" onsubmit="return confirm('Saara stored data delete hoga. Pakka?')" style="margin:0"><button class="ghost">Clear data</button></form>` : ""}
     <a href="/logout"><button class="ghost" type="button">Logout</button></a>

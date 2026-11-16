@@ -252,24 +252,44 @@ async function processSnapshot(env, snap, source) {
     await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "info", "Monitoring wapas chalu").run();
   }
 
-  if (env.EMAIL_MODE !== "changes" || changes.length || firstRun || wasFailing) {
-    const newOnes = changes.filter((c) => c.type === "new_order");
-    const ordered = [...newOnes, ...changes.filter((c) => c.type === "status"), ...changes.filter((c) => c.type !== "new_order" && c.type !== "status")];
-    const short = ordered.slice(0, 3).map((c) => (c.type === "new_order" ? `New order #${c.id}${c.amount != null ? " ₹" + c.amount.toLocaleString("en-IN") : ""}` : describe(c, true))).join(", ");
-    const time = new Date(now).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
+  // Rules: mail sirf zaroori cheezon par; baaki sab sirf app notification
+  const mailStatus = new RegExp((env.MAIL_STATUSES || "deliver").split(",").map((x) => x.trim()).filter(Boolean).join("|") || "^$", "i");
+  const isSaleUp = (c) => c.type === "metric" && /^(this month sales|today's sales)$/i.test(c.label) &&
+    typeof c.from === "number" && typeof c.to === "number" && c.to > c.from;
+  const mailWorthy = changes.filter((c) => c.type === "new_order" || (c.type === "status" && mailStatus.test(c.to)) || isSaleUp(c));
+  const newOnes = changes.filter((c) => c.type === "new_order");
+  const time = new Date(now).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
+
+  if (firstRun || mailWorthy.length || wasFailing) {
+    const delivered = mailWorthy.filter((c) => c.type === "status");
+    const sales = mailWorthy.filter(isSaleUp);
+    const short = [
+      ...newOnes.map((c) => `New order #${c.id}${c.amount != null ? " ₹" + c.amount.toLocaleString("en-IN") : ""}`),
+      ...delivered.map((c) => `#${c.id} ${c.to}`),
+      ...(!newOnes.length ? sales.map((c) => describe(c, true)) : []),
+    ].slice(0, 3).join(", ");
     const subject = firstRun
       ? `[Kirana Club] Monitoring started – ${time}`
       : newOnes.length
       ? `[Kirana Club] 🆕 NEW ORDER: ${short} – ${time}`
-      : changes.length
-      ? `[Kirana Club] 🔔 ${changes.length} change${changes.length > 1 ? "s" : ""}: ${short} – ${time}`
-      : `[Kirana Club] No change – ${time}`;
-    const tag = newOnes.length ? "order" : changes.length || firstRun ? "change" : "quiet";
-    await sendMail(env, subject, emailHtml({ kind: "report", firstRun, changes, metrics, prevMetrics, statusCounts, env, now }), tag);
+      : delivered.length
+      ? `[Kirana Club] ✅ ${short} – ${time}`
+      : sales.length
+      ? `[Kirana Club] 💰 Sale update: ${short} – ${time}`
+      : `[Kirana Club] ✅ Monitoring wapas chalu – ${time}`;
+    // Mail mein saare changes dikhte hain (context ke liye), trigger sirf zaroori wale
+    await sendMail(env, subject, emailHtml({ kind: "report", firstRun, changes, metrics, prevMetrics, statusCounts, env, now }), newOnes.length ? "order" : "change");
   }
+
   if (changes.length) {
     const n = buildNotice(changes, metrics);
     await pushNotify(env, n.kind, n.title, n.body);
+  } else if (!firstRun) {
+    // Kuch nahi badla: bina sound ka notification, purane ko replace karta hai
+    const today = metrics["Today's Sales"];
+    const transit = statusCounts["In Transit"];
+    await pushNotify(env, "quiet", `✓ Koi change nahi · ${time}`,
+      [today != null ? `Aaj ki sale ${inr(today)}` : "", transit != null ? `In Transit ${transit}` : ""].filter(Boolean).join(" · "));
   }
   return { ok: true, changes: changes.length };
 }
@@ -339,15 +359,23 @@ async function dispatch(env) {
   if (r.status >= 300) await recordFailure(env, "auto", "DISPATCH", `GitHub trigger fail (${r.status}). GH_TOKEN check kariye.`);
 }
 
+// IST mein raat 12:00 se subah 7:30 tak koi check nahi
+function istMinutes(ts) {
+  const d = new Date(ts + 330 * 60000);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+const isQuiet = (ts) => istMinutes(ts) < 7 * 60 + 30;
+
 async function cronTick(env) {
   const now = Date.now();
+  if (isQuiet(now)) return; // raat: silent
   await env.DB.prepare("DELETE FROM runs WHERE ts < ?").bind(now - 90 * 864e5).run();
   await env.DB.prepare("DELETE FROM events WHERE ts < ? AND type IN ('metric','info')").bind(now - 180 * 864e5).run();
   await ensureCleanupTable(env);
   await env.DB.prepare("DELETE FROM cleanup_log WHERE ts < ?").bind(now - 31 * 864e5).run();
   await env.DB.prepare("DELETE FROM notifications WHERE ts < ?").bind(now - 7 * 864e5).run();
   const last = await env.DB.prepare("SELECT ts FROM runs ORDER BY ts DESC LIMIT 1").first();
-  if (last && now - last.ts > 75 * 60000 && !(await getSetting(env, "stale_alerted"))) {
+  if (istMinutes(now) >= 8 * 60 + 45 && last && now - last.ts > 75 * 60000 && !(await getSetting(env, "stale_alerted"))) {
     await setSetting(env, "stale_alerted", "1");
     const mins = Math.round((now - last.ts) / 60000);
     await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "error", `${mins} min se koi check nahi aaya`).run();
@@ -445,11 +473,15 @@ self.addEventListener("push", (e) => {
       const r = await fetch("/api/notify/latest", { credentials: "include", cache: "no-store" });
       if (r.ok) { const j = await r.json(); if (j && j.title) n = j; }
     } catch (_) {}
-    const order = n.kind === "order";
-    await self.registration.showNotification(n.title, {
-      body: n.body, tag: "kc-" + n.id, renotify: true, icon: "/icon.png", badge: "/icon.png",
-      vibrate: order ? [300, 120, 300, 120, 700] : [200, 100, 200], requireInteraction: order, data: { url: "/" },
-    });
+    const order = n.kind === "order", quiet = n.kind === "quiet";
+    if (quiet) {
+      const old = await self.registration.getNotifications({ tag: "kc-quiet" });
+      old.forEach((x) => x.close());
+    }
+    await self.registration.showNotification(n.title, quiet
+      ? { body: n.body, tag: "kc-quiet", renotify: false, silent: true, icon: "/icon.png", badge: "/icon.png", data: { url: "/" } }
+      : { body: n.body, tag: "kc-" + n.id, renotify: true, icon: "/icon.png", badge: "/icon.png",
+          vibrate: order ? [300, 120, 300, 120, 700] : [200, 100, 200], requireInteraction: order, data: { url: "/" } });
     const cs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     cs.forEach((c) => c.postMessage({ type: "kc-notify", n }));
   })());
@@ -486,7 +518,7 @@ async function sendMail(env, subject, htmlBody, tag = "change") {
   const to = env.MAIL_TO.split(",").map((s) => s.trim()).filter(Boolean)
     .map((a) => (/@gmail\.com$/i.test(a) ? a.replace("@", `+kc-${tag}@`) : a));
   try {
-    await fetch("https://api.resend.com/emails", {
+    await fetch(env.RESEND_URL || "https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ from, to, subject, html: htmlBody }),
