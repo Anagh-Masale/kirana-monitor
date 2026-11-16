@@ -58,6 +58,17 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
 .sub{color:var(--muted);font-size:12.5px}
 .tablewrap{overflow-x:auto;margin:0 -8px}
+.toast{position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-140%);transition:transform .35s ease;z-index:50;
+background:#1E1914;color:#fff;border-radius:14px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25);width:min(92vw,420px)}
+.toast.show{transform:translateX(-50%) translateY(0)}.toast b{display:block;font-size:15px;margin-bottom:3px}.toast span{font-size:13.5px;opacity:.85;white-space:pre-line}
+.toast.order{background:#1E7F55}
+.pushbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.pushbar .sub{flex:1;min-width:200px}
+details.card summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:baseline;font-weight:700;font-size:15px}
+details.card summary::-webkit-details-marker{display:none}
+.cl{list-style:none;margin:12px 0 0;padding:0;max-height:520px;overflow:auto}
+.cl li{display:grid;grid-template-columns:62px 1fr auto;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;align-items:baseline}
+.cl a{color:var(--info);font-weight:600;text-decoration:none;white-space:nowrap}
 footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:600px){.kpi .v{font-size:22px}.hide-sm{display:none}}
 `;
@@ -66,7 +77,7 @@ const page = (title, body, refresh = false) => `<!doctype html><html lang="en"><
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#C4623A">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="KC Tracker"><link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-title" content="KC Tracker"><link rel="apple-touch-icon" href="/icon.png">
 ${refresh ? '<meta http-equiv="refresh" content="300">' : ""}<title>${title}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23C4623A'/><text x='16' y='21' font-size='14' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>KC</text></svg>">
 <style>${CSS}</style></head><body>${body}</body></html>`;
@@ -121,6 +132,67 @@ function chart(dayList, now) {
   const total = vals.reduce((a, b) => a + b, 0);
   return { total, svg: `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="New orders per day, last 14 days">${bars}${lbl(8, "start", "14 din pehle")}${lbl(W - 8, "end", "Aaj")}</svg>` };
 }
+
+function cleanupSection(d) {
+  const rows = d.cleanup || [];
+  let html = "", last = "";
+  for (const r of rows) {
+    const day = fmtDay(r.ts);
+    if (day !== last) { html += `<li style="display:block;border:0;padding-top:12px" class="sub"><b>${esc(day)}</b></li>`; last = day; }
+    html += `<li><span class="sub">${fmtTime(r.ts)}</span><span>${esc(r.subject || "")}${r.mail_ts ? `<div class="sub">Mail ka time: ${fmtTime(r.mail_ts)}, ${esc(fmtDay(r.mail_ts))}</div>` : ""}</span>
+      <a href="https://mail.google.com/mail/u/0/#trash/${encodeURIComponent(r.msg_id)}" target="_blank" rel="noopener">Gmail mein dekhiye</a></li>`;
+  }
+  const lc = d.lastCleanup ? `Last cleanup ${fmtTime(d.lastCleanup)} (${ago(d.lastCleanup, d.now)})` : "Cleanup script abhi connect nahi hua";
+  return `<details class="card" style="margin-top:16px"><summary>🧹 Mail cleanup log <small class="sub" style="font-weight:500">30 din · ${rows.length} mails trash mein gaye</small></summary>
+    <div class="sub" style="margin-top:8px">${lc}. Sirf "No change" mails hatate hain. Gmail Trash mein 30 din tak rehte hain, link se khol kar "Move to Inbox" kar sakte hain.</div>
+    <ul class="cl">${html || '<li style="display:block;border:0" class="empty">Abhi koi mail trash mein nahi gaya</li>'}</ul></details>`;
+}
+
+const CLIENT_JS = `
+let AC;
+function unlockAudio(){try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume();}catch(_){}}
+document.addEventListener("click",unlockAudio);document.addEventListener("touchstart",unlockAudio,{passive:true});
+function tone(f,t0,d,type,g){const o=AC.createOscillator(),v=AC.createGain();o.type=type||"triangle";o.frequency.value=f;
+v.gain.setValueAtTime(0.0001,t0);v.gain.exponentialRampToValueAtTime(g||0.25,t0+0.01);v.gain.exponentialRampToValueAtTime(0.0001,t0+d);
+o.connect(v).connect(AC.destination);o.start(t0);o.stop(t0+d+0.05);}
+function chaChing(){if(!AC)return;const t=AC.currentTime;tone(1318.5,t,0.16);tone(1975.5,t+0.09,0.55);tone(2637,t+0.09,0.5,"sine",0.12);
+[0.22,0.29,0.36,0.43].forEach((d,i)=>tone(2800+i*450,t+d,0.14,"sine",0.06));}
+function ding(){if(!AC)return;const t=AC.currentTime;tone(880,t,0.3,"sine",0.2);tone(1320,t+0.13,0.4,"sine",0.15);}
+let tTimer;function toast(title,body,order){const el=document.getElementById("toast");document.getElementById("tT").textContent=title;
+document.getElementById("tB").textContent=body||"";el.className="toast show"+(order?" order":"");clearTimeout(tTimer);tTimer=setTimeout(()=>el.className="toast",9000);
+order?chaChing():ding();}
+function u8(b){const p="=".repeat((4-b.length%4)%4);const s=atob((b+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from(s,c=>c.charCodeAt(0));}
+const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+const $=id=>document.getElementById(id);
+function setOn(){$("pushState").textContent="✅ Is device par notifications on hain"+(KC.devices>1?" ("+KC.devices+" devices)":"");$("pushBtn").style.display="none";$("pushTest").style.display="";}
+async function saveSub(sub){await fetch("/api/push/subscribe",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(sub)});}
+async function enablePush(){unlockAudio();
+ if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){
+  $("pushState").textContent=isIOS&&!standalone?"iPhone par pehle Safari → Share → Add to Home Screen kariye, phir Home Screen wale app se ye button dabaiye.":"Is browser mein notifications support nahi hain. Chrome/Safari use kariye.";return;}
+ try{const perm=await Notification.requestPermission();
+  if(perm!=="granted"){$("pushState").textContent="Permission nahi mili. Phone Settings → is app → Notifications → Allow kariye.";return;}
+  const reg=await navigator.serviceWorker.ready;const {key}=await (await fetch("/api/push/key")).json();
+  let sub=await reg.pushManager.getSubscription();if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:u8(key)});
+  await saveSub(sub);KC.devices=Math.max(KC.devices,1);setOn();
+ }catch(e){$("pushState").textContent="Notification on nahi hua: "+e.message;}}
+async function testPush(){unlockAudio();$("pushState").textContent="Test bhej rahe hain…";
+ const r=await (await fetch("/api/push/test",{method:"POST"})).json();
+ $("pushState").textContent=r.sent?"Test bheja ("+r.sent+" device). 5–10 sec mein notification aayega.":"Koi device registered nahi. Pehle 'Notifications on kariye' dabaiye.";}
+if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").then(async()=>{
+ if("Notification" in window&&Notification.permission==="granted"){const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();if(sub){saveSub(sub);setOn();}}
+});
+ navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="kc-notify"){const n=e.data.n;toast(n.title,n.body,n.kind==="order");}});}
+let shownByPush=0;
+setInterval(async()=>{try{const j=await (await fetch("/api/data",{cache:"no-store"})).json();
+ const evId=(j.lastEvent&&j.lastEvent.id)||0, runTs=(j.lastRun&&j.lastRun.ts)||0;
+ if(evId>KC.lastEvent){const fresh=j.events.filter(e=>e.id>KC.lastEvent);const isOrder=fresh.some(e=>e.type==="new_order");
+  const main=fresh.find(e=>e.type==="new_order")||fresh[0];
+  toast(isOrder?"🆕 Naya order aaya!":"🔔 Kirana Club update",main.title+(fresh.length>1?"\\n+"+(fresh.length-1)+" aur":""),isOrder);
+  KC.lastEvent=evId;setTimeout(()=>location.reload(),8000);}
+ else if(runTs>KC.lastRun){location.reload();}
+}catch(_){}},60000);
+`;
 
 function sessionForm() {
   return `<form method="post" action="/session" style="display:grid;gap:8px">
@@ -182,6 +254,12 @@ export function dashboardPage(d, env) {
     <span>Har <b>30 min</b> auto-check</span>
     <span>24 ghante mein <b>${d.runs24h.ok}/${d.runs24h.total}</b> checks successful</span>
   </div>
+  <div class="card pushbar">
+    <span style="font-size:20px">🔔</span>
+    <div class="sub" id="pushState" style="color:var(--ink)">Phone notifications: is device par on kariye (naya order, status change, alerts)</div>
+    <button id="pushBtn" onclick="enablePush()">Notifications on kariye</button>
+    <button id="pushTest" class="ghost" style="display:none" onclick="testPush()">Test bhejiye</button>
+  </div>
   ${d.demo ? `<div class="banner demo"><b>Demo mode.</b> Ye sample data hai taaki aap system ko chalta hua dekh sakein. Portal adapter lagte hi asli Kirana Club data aayega.</div>` : ""}
   ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 minute mein naya data aa jayega, page apne aap refresh hoga.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
   ${failBanner}
@@ -198,12 +276,16 @@ export function dashboardPage(d, env) {
       </section>
     </div>
   </div>
+  ${cleanupSection(d)}
   <footer>
     ${d.demo ? `<form method="post" action="/reset" onsubmit="return confirm('Saara stored data delete hoga. Pakka?')" style="margin:0"><button class="ghost">Clear data</button></form>` : ""}
     <a href="/logout"><button class="ghost" type="button">Logout</button></a>
   </footer>
-</div>`;
-  return page("Kirana Club Tracker", body, true);
+</div>
+<div class="toast" id="toast"><b id="tT"></b><span id="tB"></span></div>
+<script>window.KC={lastEvent:${Number(d.lastEvent?.id || 0)},lastRun:${Number(d.lastRun?.ts || 0)},devices:${Number(d.pushDevices || 0)}};</script>
+<script>${CLIENT_JS}</script>`;
+  return page("Kirana Club Tracker", body, false);
 }
 
 // ---------------- email ----------------

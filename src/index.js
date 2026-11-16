@@ -41,11 +41,31 @@ async function route(req, env) {
     return new Response(JSON.stringify({
       name: "Kirana Club Tracker", short_name: "KC Tracker", start_url: "/", display: "standalone",
       background_color: "#F6F3EE", theme_color: "#C4623A",
-      icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
+      icons: [{ src: "/icon.png", sizes: "180x180", type: "image/png" }, { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
     }), { headers: { "content-type": "application/manifest+json" } });
+  if (p === "/icon.png")
+    return new Response(Uint8Array.from(atob(ICON_PNG), (c) => c.charCodeAt(0)),
+      { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
   if (p === "/icon.svg")
     return new Response(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#C4623A"/><text x="256" y="320" font-size="210" text-anchor="middle" fill="#fff" font-family="Arial,sans-serif" font-weight="700">KC</text></svg>`,
       { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } });
+
+  if (p === "/sw.js")
+    return new Response(SW_JS, { headers: { "content-type": "application/javascript", "cache-control": "no-cache" } });
+
+  if (p === "/api/cleanup-log" && post) {
+    if (!env.INGEST_KEY || req.headers.get("authorization") !== `Bearer ${env.INGEST_KEY}`)
+      return new Response("unauthorized", { status: 401 });
+    await ensureCleanupTable(env);
+    const { items = [] } = await req.json();
+    const now = Date.now();
+    const st = items.slice(0, 500).map((it) =>
+      env.DB.prepare("INSERT OR IGNORE INTO cleanup_log(msg_id,ts,mail_ts,subject) VALUES(?,?,?,?)")
+        .bind(String(it.msgId), now, Number(it.date) || null, String(it.subject || "").slice(0, 200)));
+    for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
+    await setSetting(env, "last_cleanup", String(now));
+    return Response.json({ ok: true, logged: st.length });
+  }
 
   if (p === "/api/state") {
     if (!env.INGEST_KEY || req.headers.get("authorization") !== `Bearer ${env.INGEST_KEY}`)
@@ -56,13 +76,13 @@ async function route(req, env) {
   if (p === "/login" && post) {
     const f = await req.formData();
     if (env.DASH_PASSWORD && f.get("password") === env.DASH_PASSWORD) {
-      const exp = Date.now() + 30 * 864e5;
+      const exp = Date.now() + 365 * 864e5;
       const tok = `${exp}.${await sign(env, String(exp))}`;
       return new Response(null, {
         status: 303,
         headers: {
           location: "/",
-          "set-cookie": `kc=${tok}; Path=/; Max-Age=${30 * 86400}; HttpOnly; Secure; SameSite=Lax`,
+          "set-cookie": `kc=${tok}; Path=/; Max-Age=${365 * 86400}; HttpOnly; Secure; SameSite=Lax`,
         },
       });
     }
@@ -94,7 +114,24 @@ async function route(req, env) {
     await env.DB.prepare("DELETE FROM settings WHERE k IN ('demo_state','failing')").run();
     return redirect("/");
   }
+  if (p === "/api/push/key") return Response.json({ key: (await vapid(env)).pub });
+  if (p === "/api/push/subscribe" && post) {
+    const sub = await req.json();
+    if (!sub?.endpoint || !/^https:\/\//.test(sub.endpoint)) return new Response("bad", { status: 400 });
+    await env.DB.prepare("INSERT INTO push_subs(endpoint,sub,ua,created) VALUES(?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET sub=excluded.sub")
+      .bind(sub.endpoint, JSON.stringify(sub), (req.headers.get("user-agent") || "").slice(0, 200), Date.now()).run();
+    return Response.json({ ok: true });
+  }
+  if (p === "/api/push/test" && post)
+    return Response.json(await pushNotify(env, "order", "🆕 Test: New order #123456 · ₹960", "Ramesh Kirana, Patna · COD\nNotifications sahi chal rahe hain ✅"));
+  if (p === "/api/notify/latest")
+    return Response.json(await env.DB.prepare("SELECT id,ts,kind,title,body FROM notifications ORDER BY id DESC LIMIT 1").first());
   if (p === "/api/data") return Response.json(await loadDashboard(env));
+  if (p === "/api/latest") {
+    const after = Number(url.searchParams.get("after") || 0);
+    const r = await env.DB.prepare("SELECT id,ts,type,title FROM events WHERE id > ? ORDER BY id ASC LIMIT 20").bind(after).all();
+    return Response.json({ events: r.results });
+  }
   if (p === "/") return html(dashboardPage({ ...(await loadDashboard(env)), queued: url.searchParams.has("queued") }, env));
   return new Response("Not found", { status: 404 });
 }
@@ -128,7 +165,9 @@ async function recordFailure(env, source, code, message) {
         : code === "CONFIG"
         ? "[Kirana Club] ⚠ Portal connection set nahi hai"
         : "[Kirana Club] ⚠ Monitor error";
-    await sendMail(env, subject, emailHtml({ kind: "error", code, message, env, now }));
+    await sendMail(env, subject, emailHtml({ kind: "error", code, message, env, now }), "alert");
+    await pushNotify(env, "alert", code === "SESSION" ? "⚠️ Kirana Club login expire" : "⚠️ Monitor error",
+      code === "SESSION" ? "Dashboard kholiye aur naya cookie paste kariye" : String(message).slice(0, 140));
   }
   return { ok: false, code, message };
 }
@@ -219,7 +258,12 @@ async function processSnapshot(env, snap, source) {
       : changes.length
       ? `[Kirana Club] 🔔 ${changes.length} change${changes.length > 1 ? "s" : ""}: ${short} – ${time}`
       : `[Kirana Club] No change – ${time}`;
-    await sendMail(env, subject, emailHtml({ kind: "report", firstRun, changes, metrics, prevMetrics, statusCounts, env, now }));
+    const tag = newOnes.length ? "order" : changes.length || firstRun ? "change" : "quiet";
+    await sendMail(env, subject, emailHtml({ kind: "report", firstRun, changes, metrics, prevMetrics, statusCounts, env, now }), tag);
+  }
+  if (changes.length) {
+    const n = buildNotice(changes, metrics);
+    await pushNotify(env, n.kind, n.title, n.body);
   }
   return { ok: true, changes: changes.length };
 }
@@ -231,13 +275,16 @@ async function loadDashboard(env) {
   const [lastRun, okRuns, events, orders, recentOrders, day, failing, hasToken] = await Promise.all([
     q("SELECT * FROM runs ORDER BY ts DESC LIMIT 1").first(),
     q("SELECT ts,metrics,status_counts FROM runs WHERE ok=1 ORDER BY ts DESC LIMIT 2").all(),
-    q("SELECT ts,type,title FROM events ORDER BY ts DESC LIMIT 150").all(),
+    q("SELECT id,ts,type,title FROM events ORDER BY id DESC LIMIT 150").all(),
     q("SELECT id,status,amount,customer,city,placed_at,payment,first_seen,updated_at FROM orders ORDER BY updated_at DESC, CAST(id AS INTEGER) DESC LIMIT 300").all(),
     q("SELECT placed_at, first_seen FROM orders ORDER BY first_seen DESC LIMIT 3000").all(),
     q("SELECT ok FROM runs WHERE ts > ?", now - 864e5).all(),
     getSetting(env, "failing"),
     getSetting(env, "KC_STATE"),
   ]);
+  await ensureCleanupTable(env);
+  const cleanup = (await q("SELECT msg_id,ts,mail_ts,subject FROM cleanup_log WHERE ts > ? ORDER BY ts DESC LIMIT 2000", now - 30 * 864e5).all()).results;
+  const lastEvent = d_lastEvent(events.results);
   const [cur, prv] = okRuns.results;
   return {
     now,
@@ -251,6 +298,10 @@ async function loadDashboard(env) {
     failing,
     demo: env.DEMO === "1",
     hasToken: !!hasToken,
+    cleanup,
+    lastEvent,
+    pushDevices: (await env.DB.prepare("SELECT COUNT(*) n FROM push_subs").first())?.n || 0,
+    lastCleanup: Number(await getSetting(env, "last_cleanup")) || null,
   };
 }
 
@@ -285,25 +336,153 @@ async function cronTick(env) {
   const now = Date.now();
   await env.DB.prepare("DELETE FROM runs WHERE ts < ?").bind(now - 90 * 864e5).run();
   await env.DB.prepare("DELETE FROM events WHERE ts < ? AND type IN ('metric','info')").bind(now - 180 * 864e5).run();
+  await ensureCleanupTable(env);
+  await env.DB.prepare("DELETE FROM cleanup_log WHERE ts < ?").bind(now - 31 * 864e5).run();
+  await env.DB.prepare("DELETE FROM notifications WHERE ts < ?").bind(now - 7 * 864e5).run();
   const last = await env.DB.prepare("SELECT ts FROM runs ORDER BY ts DESC LIMIT 1").first();
   if (last && now - last.ts > 75 * 60000 && !(await getSetting(env, "stale_alerted"))) {
     await setSetting(env, "stale_alerted", "1");
     const mins = Math.round((now - last.ts) / 60000);
     await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "error", `${mins} min se koi check nahi aaya`).run();
     await sendMail(env, "[Kirana Club] ⚠ Monitor ruka hua hai",
-      emailHtml({ kind: "error", code: "STALE", message: `Pichhle ${mins} minute se koi check complete nahi hua. GitHub Actions ka run dekhiye.`, env, now }));
+      emailHtml({ kind: "error", code: "STALE", message: `Pichhle ${mins} minute se koi check complete nahi hua. GitHub Actions ka run dekhiye.`, env, now }), "alert");
+    await pushNotify(env, "alert", "⚠️ Monitor ruka hua hai", `${mins} min se koi check nahi hua`);
   }
   await dispatch(env);
 }
 
+// ---------------- Push notifications (web app, Android + iPhone) ----------------
+const inr = (a) => (a != null ? "₹" + Number(a).toLocaleString("en-IN") : "");
+const b64u = (buf) =>
+  btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+function buildNotice(changes, metrics) {
+  const no = changes.filter((c) => c.type === "new_order");
+  const st = changes.filter((c) => c.type === "status");
+  const ot = changes.filter((c) => c.type !== "new_order" && c.type !== "status");
+  const today = metrics["Today's Sales"];
+  const tail = today != null ? `Aaj ki sale: ${inr(today)}` : "";
+  const icon = (s) => (/rto|return|exception|ndr/i.test(s) ? "🔴" : /cancel/i.test(s) ? "⚪" : /deliver/i.test(s) ? "✅" : "🚚");
+  if (no.length) {
+    const c = no[0];
+    const title = no.length === 1
+      ? `🆕 New order #${c.id} · ${inr(c.amount)}`
+      : `🆕 ${no.length} naye orders · ${inr(no.reduce((a, x) => a + (x.amount || 0), 0))}`;
+    const lines = no.length === 1
+      ? [[c.customer, c.city].filter(Boolean).join(", ") + (c.payment ? ` · ${c.payment}` : "")]
+      : no.slice(0, 4).map((x) => `#${x.id} ${inr(x.amount)} · ${x.customer || ""}`);
+    if (st.length + ot.length) lines.push(`+${st.length + ot.length} aur update`);
+    if (tail) lines.push(tail);
+    return { kind: "order", title, body: lines.join("\n") };
+  }
+  if (st.length) {
+    const c = st[0];
+    const title = st.length === 1 ? `${icon(c.to)} #${c.id}: ${c.to}` : `🚚 ${st.length} orders ka status badla`;
+    const lines = st.slice(0, 4).map((x) => `${icon(x.to)} #${x.id}: ${x.from} → ${x.to}`);
+    if (st.length === 1 && c.customer) lines[0] += ` · ${c.customer}`;
+    if (st.length > 4) lines.push(`…aur ${st.length - 4}`);
+    if (ot.length) lines.push(`+${ot.length} aur update`);
+    return { kind: "change", title, body: lines.join("\n") };
+  }
+  return { kind: "change", title: "🔔 Kirana Club update", body: ot.slice(0, 4).map((c) => describe(c)).join("\n") };
+}
+
+async function vapid(env) {
+  const saved = await getSetting(env, "VAPID");
+  if (saved) return JSON.parse(saved);
+  const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const v = { priv: await crypto.subtle.exportKey("jwk", kp.privateKey), pub: b64u(await crypto.subtle.exportKey("raw", kp.publicKey)) };
+  await setSetting(env, "VAPID", JSON.stringify(v));
+  return v;
+}
+
+async function pushOne(env, endpoint, v) {
+  const enc = (o) => b64u(new TextEncoder().encode(JSON.stringify(o)));
+  const unsigned = enc({ typ: "JWT", alg: "ES256" }) + "." +
+    enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: "mailto:noreply@anaghmasale.com" });
+  const key = await crypto.subtle.importKey("jwk", v.priv, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
+  return fetch(endpoint, {
+    method: "POST",
+    headers: { authorization: `vapid t=${unsigned}.${b64u(sig)}, k=${v.pub}`, TTL: "86400", Urgency: "high", "content-length": "0" },
+  });
+}
+
+// Notification ka text DB mein, phone ko sirf "jago" signal; app ka service worker text yahan se padhta hai
+async function pushNotify(env, kind, title, body) {
+  try {
+    await env.DB.prepare("INSERT INTO notifications(ts,kind,title,body) VALUES(?,?,?,?)").bind(Date.now(), kind, title, body || "").run();
+    const subs = (await env.DB.prepare("SELECT endpoint FROM push_subs").all()).results;
+    if (!subs.length) return { sent: 0 };
+    const v = await vapid(env);
+    let sent = 0;
+    for (const s of subs) {
+      const r = await pushOne(env, s.endpoint, v).catch(() => null);
+      if (r && (r.status === 404 || r.status === 410))
+        await env.DB.prepare("DELETE FROM push_subs WHERE endpoint=?").bind(s.endpoint).run();
+      else if (r && r.status < 300) sent++;
+    }
+    return { sent, total: subs.length };
+  } catch (_) {
+    return { sent: 0 };
+  }
+}
+
+const SW_JS = `
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("push", (e) => {
+  e.waitUntil((async () => {
+    let n = { id: Date.now(), kind: "change", title: "Kirana Club update", body: "Dashboard kholiye" };
+    try {
+      const r = await fetch("/api/notify/latest", { credentials: "include", cache: "no-store" });
+      if (r.ok) { const j = await r.json(); if (j && j.title) n = j; }
+    } catch (_) {}
+    const order = n.kind === "order";
+    await self.registration.showNotification(n.title, {
+      body: n.body, tag: "kc-" + n.id, renotify: true, icon: "/icon.png", badge: "/icon.png",
+      vibrate: order ? [300, 120, 300, 120, 700] : [200, 100, 200], requireInteraction: order, data: { url: "/" },
+    });
+    const cs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    cs.forEach((c) => c.postMessage({ type: "kc-notify", n }));
+  })());
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const cs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of cs) { if ("focus" in c) { try { await c.navigate("/"); } catch (_) {} return c.focus(); } }
+    return self.clients.openWindow("/");
+  })());
+});`;
+
+let cleanupReady = false;
+async function ensureCleanupTable(env) {
+  if (cleanupReady) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS cleanup_log (msg_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, mail_ts INTEGER, subject TEXT)").run();
+  cleanupReady = true;
+}
+const d_lastEvent = (evs) => (evs[0] ? { id: evs[0].id } : { id: 0 });
+
 // ---------------- helpers ----------------
-async function sendMail(env, subject, htmlBody) {
+// Mail type ke hisaab se bhejne wale ka naam + "+tag" address (Gmail filter/label ke liye)
+const MAIL_KIND = {
+  order: "🆕 KC New Order",
+  change: "🔔 KC Update",
+  quiet: "KC No Change",
+  alert: "⚠️ KC Alert",
+};
+async function sendMail(env, subject, htmlBody, tag = "change") {
   if (!env.RESEND_API_KEY || !env.MAIL_TO) return;
+  const fromAddr = (env.MAIL_FROM.match(/<([^>]+)>/) || [null, env.MAIL_FROM])[1];
+  const from = `${MAIL_KIND[tag] || "Kirana Monitor"} <${fromAddr}>`;
+  const to = env.MAIL_TO.split(",").map((s) => s.trim()).filter(Boolean)
+    .map((a) => (/@gmail\.com$/i.test(a) ? a.replace("@", `+kc-${tag}@`) : a));
   try {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM, to: env.MAIL_TO.split(",").map((s) => s.trim()), subject, html: htmlBody }),
+      body: JSON.stringify({ from, to, subject, html: htmlBody }),
     });
   } catch (_) {}
 }
@@ -328,3 +507,5 @@ async function authed(req, env) {
 }
 const html = (body, status = 200) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 const redirect = (to) => new Response(null, { status: 303, headers: { location: to } });
+
+const ICON_PNG = "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";
