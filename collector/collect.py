@@ -15,8 +15,11 @@ import urllib.request
 
 from playwright.sync_api import sync_playwright
 
-WORKER = os.environ["WORKER_URL"].rstrip("/")
-KEY = os.environ["INGEST_KEY"]
+WORKER = os.environ.get("WORKER_URL", "").strip().rstrip("/")
+KEY = os.environ.get("INGEST_KEY", "").strip()
+if not WORKER or not KEY:
+    print("SETUP ERROR: GitHub secrets WORKER_URL / INGEST_KEY set nahi hain")
+    sys.exit(1)
 SITE = os.getenv("SITE_URL", "https://supplier.kirana.club").rstrip("/")
 OVERVIEW_URL = os.getenv("OVERVIEW_URL", SITE + "/en/apps/ecommerce/orders/overview")
 ORDERS_URL = os.getenv("ORDERS_URL", SITE + "/en/apps/ecommerce/orders/list")
@@ -28,7 +31,8 @@ def api(path, payload=None):
     req = urllib.request.Request(
         WORKER + path,
         data=json.dumps(payload).encode() if payload is not None else None,
-        headers={"authorization": f"Bearer {KEY}", "content-type": "application/json"},
+        headers={"authorization": f"Bearer {KEY}", "content-type": "application/json",
+                 "user-agent": "Mozilla/5.0 (kirana-monitor collector)"},
         method="POST" if payload is not None else "GET",
     )
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -264,5 +268,9 @@ if __name__ == "__main__":
             api("/api/ingest", {"error": msg, "error_code": "ERROR"})
         except Exception:
             pass
-        print("failed:", type(e).__name__)
+        import urllib.error
+        if isinstance(e, urllib.error.HTTPError):
+            print(f"failed: Worker ne HTTP {e.code} diya ({e.url.split('?')[0]})")
+        else:
+            print("failed:", msg[:200])
         sys.exit(1)
