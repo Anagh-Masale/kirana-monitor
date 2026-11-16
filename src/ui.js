@@ -64,6 +64,9 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 
 const page = (title, body, refresh = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#C4623A">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="KC Tracker"><link rel="apple-touch-icon" href="/icon.svg">
 ${refresh ? '<meta http-equiv="refresh" content="300">' : ""}<title>${title}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23C4623A'/><text x='16' y='21' font-size='14' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>KC</text></svg>">
 <style>${CSS}</style></head><body>${body}</body></html>`;
@@ -221,9 +224,23 @@ export function emailHtml({ kind, code, message, firstRun, changes = [], metrics
       <p style="margin:0 0 8px;font-size:14px">${esc(message)}</p><p style="margin:0;font-size:14px;color:#7B7168">${fix}</p>`);
   }
 
-  const headline = firstRun ? "Monitoring shuru ho gayi" : changes.length ? `${changes.length} change${changes.length > 1 ? "s" : ""} pichhle check se` : "Pichhle check se kuch nahi badla";
-  const changeList = changes.length
-    ? `<ul style="margin:0 0 16px;padding-left:18px;font-size:14px;line-height:1.7">${changes.map((c) => `<li>${esc(describe(c))}</li>`).join("")}</ul>` : "";
+  const newOrders = changes.filter((c) => c.type === "new_order");
+  const statusCh = changes.filter((c) => c.type === "status");
+  const otherCh = changes.filter((c) => c.type !== "new_order" && c.type !== "status");
+  const headline = firstRun ? "Monitoring shuru ho gayi"
+    : newOrders.length ? `🆕 ${newOrders.length} naya order aaya!`
+    : changes.length ? `${changes.length} change${changes.length > 1 ? "s" : ""} pichhle check se` : "Pichhle check se kuch nahi badla";
+  const rs = (a) => (a != null ? "₹" + Number(a).toLocaleString("en-IN") : "");
+  const tone = (s) => ({ bad: ["#BF3A2B", "#FBE8E5"], good: ["#1E7F55", "#E5F3EB"], warn: ["#A86A12", "#FCF1DE"], mute: ["#6B7280", "#F0F0EF"] }[statusTone(s)] || ["#3756C8", "#E8EDFC"]);
+  const newBlock = newOrders.map((c) => `<div style="border:2px solid #1E7F55;background:#E5F3EB;border-radius:12px;padding:14px 16px;margin:0 0 10px">
+      <div style="font-size:12px;font-weight:700;color:#1E7F55;letter-spacing:.5px">NEW ORDER</div>
+      <div style="font-size:20px;font-weight:800;margin:4px 0 2px">#${esc(c.id)} · ${esc(rs(c.amount))}</div>
+      <div style="font-size:14px;color:#3d352e">${esc(c.customer || "")}${c.city ? ", " + esc(c.city) : ""}${c.payment ? ` · <b>${esc(c.payment)}</b>` : ""} · ${esc(c.status)}</div></div>`).join("");
+  const stBlock = statusCh.length ? `<div style="margin:6px 0 14px">${statusCh.map((c) => { const [fg, bg] = tone(c.to);
+      return `<div style="padding:9px 12px;border-radius:10px;background:${bg};margin-bottom:6px;font-size:14px">
+        <b>#${esc(c.id)}</b> ${esc(c.from)} → <b style="color:${fg}">${esc(c.to)}</b>${c.customer ? ` · ${esc(c.customer)}` : ""}${c.amount != null ? ` · ${esc(rs(c.amount))}` : ""}</div>`; }).join("")}</div>` : "";
+  const otherBlock = otherCh.length ? `<ul style="margin:0 0 16px;padding-left:18px;font-size:14px;line-height:1.7">${otherCh.map((c) => `<li>${esc(describe(c))}</li>`).join("")}</ul>` : "";
+  const changeList = newBlock + stBlock + otherBlock;
   const mrows = Object.entries(metrics).map(([k, v]) => {
     const p = prevMetrics[k];
     const diff = typeof v === "number" && typeof p === "number" && v !== p ? v - p : 0;

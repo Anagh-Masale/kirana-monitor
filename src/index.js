@@ -37,6 +37,16 @@ async function route(req, env) {
     return Response.json(await processSnapshot(env, body, "ingest"));
   }
 
+  if (p === "/manifest.webmanifest")
+    return new Response(JSON.stringify({
+      name: "Kirana Club Tracker", short_name: "KC Tracker", start_url: "/", display: "standalone",
+      background_color: "#F6F3EE", theme_color: "#C4623A",
+      icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
+    }), { headers: { "content-type": "application/manifest+json" } });
+  if (p === "/icon.svg")
+    return new Response(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#C4623A"/><text x="256" y="320" font-size="210" text-anchor="middle" fill="#fff" font-family="Arial,sans-serif" font-weight="700">KC</text></svg>`,
+      { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } });
+
   if (p === "/api/state") {
     if (!env.INGEST_KEY || req.headers.get("authorization") !== `Bearer ${env.INGEST_KEY}`)
       return new Response("unauthorized", { status: 401 });
@@ -198,10 +208,14 @@ async function processSnapshot(env, snap, source) {
   }
 
   if (env.EMAIL_MODE !== "changes" || changes.length || firstRun || wasFailing) {
-    const short = changes.slice(0, 3).map((c) => describe(c, true)).join(", ");
+    const newOnes = changes.filter((c) => c.type === "new_order");
+    const ordered = [...newOnes, ...changes.filter((c) => c.type === "status"), ...changes.filter((c) => c.type !== "new_order" && c.type !== "status")];
+    const short = ordered.slice(0, 3).map((c) => (c.type === "new_order" ? `New order #${c.id}${c.amount != null ? " ₹" + c.amount.toLocaleString("en-IN") : ""}` : describe(c, true))).join(", ");
     const time = new Date(now).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
     const subject = firstRun
       ? `[Kirana Club] Monitoring started – ${time}`
+      : newOnes.length
+      ? `[Kirana Club] 🆕 NEW ORDER: ${short} – ${time}`
       : changes.length
       ? `[Kirana Club] 🔔 ${changes.length} change${changes.length > 1 ? "s" : ""}: ${short} – ${time}`
       : `[Kirana Club] No change – ${time}`;
@@ -269,6 +283,8 @@ async function dispatch(env) {
 
 async function cronTick(env) {
   const now = Date.now();
+  await env.DB.prepare("DELETE FROM runs WHERE ts < ?").bind(now - 90 * 864e5).run();
+  await env.DB.prepare("DELETE FROM events WHERE ts < ? AND type IN ('metric','info')").bind(now - 180 * 864e5).run();
   const last = await env.DB.prepare("SELECT ts FROM runs ORDER BY ts DESC LIMIT 1").first();
   if (last && now - last.ts > 75 * 60000 && !(await getSetting(env, "stale_alerted"))) {
     await setSetting(env, "stale_alerted", "1");
