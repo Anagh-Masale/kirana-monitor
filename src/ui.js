@@ -236,7 +236,8 @@ export function dashboardPage(d, env) {
   const c = chart(d.orderDays, d.now);
   const failBanner = d.failing
     ? `<div class="banner bad"><b>${d.failing === "SESSION" ? "Kirana Club login expire ho gaya." : d.failing === "CONFIG" ? "Portal connection abhi set nahi hai." : "Pichhla check fail hua."}</b>
-       ${lr && !lr.ok ? `<div class="sub" style="color:inherit;opacity:.85;margin-top:4px">${esc(lr.error)}</div>` : ""}
+       ${lr && !lr.ok ? `<div class="sub" style="color:inherit;opacity:.85;margin-top:4px;word-break:break-word">${esc(lr.error)}</div>` : ""}
+       ${lr && !lr.ok && d.errorShotTs && Math.abs(d.errorShotTs - lr.ts) < 10 * 60000 ? `<div style="margin-top:8px"><a href="/error-shot" target="_blank" style="color:inherit;font-weight:700">📸 Fail ke waqt portal ka screenshot dekhiye</a></div>` : ""}
        ${d.failing === "SESSION" || d.failing === "CONFIG" ? sessionForm() : ""}</div>`
     : "";
 

@@ -31,6 +31,7 @@ async function route(req, env) {
       delete body.state;
     }
     if (body.error) {
+      if (body.shot) await setSetting(env, "last_error_shot", JSON.stringify({ ts: Date.now(), img: body.shot }));
       await recordFailure(env, "ingest", body.error_code || "ERROR", body.error);
       return Response.json({ ok: false });
     }
@@ -113,6 +114,11 @@ async function route(req, env) {
     await env.DB.batch(["runs", "orders", "events"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
     await env.DB.prepare("DELETE FROM settings WHERE k IN ('demo_state','failing')").run();
     return redirect("/");
+  }
+  if (p === "/error-shot") {
+    const j = JSON.parse((await getSetting(env, "last_error_shot")) || "null");
+    if (!j) return new Response("Koi screenshot nahi", { status: 404 });
+    return new Response(Uint8Array.from(atob(j.img), (c) => c.charCodeAt(0)), { headers: { "content-type": "image/jpeg" } });
   }
   if (p === "/api/push/key") return Response.json({ key: (await vapid(env)).pub });
   if (p === "/api/push/subscribe" && post) {
@@ -302,6 +308,7 @@ async function loadDashboard(env) {
     lastEvent,
     pushDevices: (await env.DB.prepare("SELECT COUNT(*) n FROM push_subs").first())?.n || 0,
     lastCleanup: Number(await getSetting(env, "last_cleanup")) || null,
+    errorShotTs: JSON.parse((await getSetting(env, "last_error_shot")) || "null")?.ts || null,
   };
 }
 

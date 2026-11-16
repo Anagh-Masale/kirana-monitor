@@ -157,6 +157,46 @@ def parse_overview(text):
     return out
 
 
+def wait_metrics(page, timeout=60):
+    """Numbers aane tak ruko (portal pehle label dikhata hai, numbers baad mein load karta hai)."""
+    end, last = time.time() + timeout, {}
+    while time.time() < end:
+        try:
+            last = parse_overview(page.inner_text("body", timeout=10000))
+        except Exception:
+            last = {}
+        if "This Month Sales" in last and "Today's Sales" in last:
+            time.sleep(1.5)  # baaki cards bhi load ho jaayein
+            try:
+                last = parse_overview(page.inner_text("body", timeout=10000)) or last
+            except Exception:
+                pass
+            return last
+        time.sleep(2)
+    return last
+
+
+LAST_PAGE = {"page": None, "shot": None, "state": None}
+
+
+def grab_shot():
+    try:
+        pg = LAST_PAGE["page"]
+        if pg and not LAST_PAGE["shot"]:
+            import base64
+            LAST_PAGE["shot"] = base64.b64encode(pg.screenshot(type="jpeg", quality=55, timeout=15000)).decode()
+    except Exception:
+        pass
+
+
+def page_debug(page):
+    try:
+        txt = re.sub(r"\s+", " ", page.inner_text("body", timeout=5000))[:250]
+    except Exception:
+        txt = "?"
+    return f"URL: {page.url} | Page text: {txt}"
+
+
 def parse_tabs(text):
     counts = {}
     for l in text.splitlines():
@@ -211,45 +251,76 @@ def main():
                                   timezone_id="Asia/Kolkata",
                                   user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
         page = ctx.new_page()
-        page.goto(OVERVIEW_URL, wait_until="domcontentloaded", timeout=60000)
-        settle(page, "this month sales")
-        if is_login(page):
-            api("/api/ingest", {"error": "Kirana Club ne login page dikhaya (session expire).", "error_code": "SESSION"})
-            print("login page"); browser.close(); return
-
-        metrics = parse_overview(page.inner_text("body"))
-        if not metrics:
-            raise RuntimeError("Overview page khula par numbers nahi mile (layout badla?)")
-
-        page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
-        settle(page)
+        LAST_PAGE["page"] = page
         try:
-            page.locator("table tbody tr").first.wait_for(timeout=45000)
-        except Exception:
-            pass
-        if is_login(page):
-            api("/api/ingest", {"error": "Orders page par login maanga (session expire).", "error_code": "SESSION"})
-            browser.close(); return
-        counts = parse_tabs(page.inner_text("body"))
-
-        orders, seen = [], set()
-        for _ in range(MAX_PAGES):
-            first = page.locator("table tbody tr").first.inner_text() if page.locator("table tbody tr").count() else ""
-            for o in read_rows(page):
-                if o["id"] not in seen:
-                    seen.add(o["id"]); orders.append(o)
-            if not next_page(page):
-                break
-            for _ in range(30):  # naya page load hone tak ruko
-                time.sleep(0.5)
-                cur = page.locator("table tbody tr").first.inner_text() if page.locator("table tbody tr").count() else ""
-                if cur != first:
+            metrics = {}
+            for attempt in range(2):  # 2 try: dusri baar page reload
+                if attempt == 0:
+                    page.goto(OVERVIEW_URL, wait_until="domcontentloaded", timeout=90000)
+                else:
+                    page.reload(wait_until="domcontentloaded", timeout=90000)
+                settle(page, "this month sales", timeout=60000)
+                if is_login(page):
+                    api("/api/ingest", {"error": "Kirana Club ne login page dikhaya (session expire).", "error_code": "SESSION"})
+                    print("login page"); browser.close(); return
+                metrics = wait_metrics(page, 60)
+                if "This Month Sales" in metrics:
                     break
-            settle(page, timeout=15000)
+            if "This Month Sales" not in metrics:
+                grab_shot()
+                raise RuntimeError("Overview ke numbers 2 try (2 min) mein load nahi hue. " + page_debug(page))
 
+            counts = {}
+            for attempt in range(2):
+                if attempt == 0:
+                    page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=90000)
+                else:
+                    page.reload(wait_until="domcontentloaded", timeout=90000)
+                settle(page, timeout=60000)
+                try:
+                    page.locator("table tbody tr").first.wait_for(timeout=60000)
+                except Exception:
+                    pass
+                if is_login(page):
+                    api("/api/ingest", {"error": "Orders page par login maanga (session expire).", "error_code": "SESSION"})
+                    browser.close(); return
+                time.sleep(1.5)
+                counts = parse_tabs(page.inner_text("body"))
+                rows_ok = page.locator("table tbody tr").count() > 0 or counts.get("All", 1) == 0
+                if counts and rows_ok:
+                    break
+            if not counts or not (page.locator("table tbody tr").count() > 0 or counts.get("All", 1) == 0):
+                grab_shot()
+                raise RuntimeError("Orders list 2 try mein load nahi hui (galat data bhejne se behtar ruk gaye). " + page_debug(page))
+
+            orders, seen = [], set()
+            for _ in range(MAX_PAGES):
+                first = page.locator("table tbody tr").first.inner_text() if page.locator("table tbody tr").count() else ""
+                for o in read_rows(page):
+                    if o["id"] not in seen:
+                        seen.add(o["id"]); orders.append(o)
+                if not next_page(page):
+                    break
+                for _ in range(30):  # naya page load hone tak ruko
+                    time.sleep(0.5)
+                    cur = page.locator("table tbody tr").first.inner_text() if page.locator("table tbody tr").count() else ""
+                    if cur != first:
+                        break
+                settle(page, timeout=15000)
+
+        except Exception:
+            grab_shot()
+            try:  # fail par bhi taaza cookies save karo, taaki login na toote
+                LAST_PAGE["state"] = json.dumps(ctx.storage_state())
+            except Exception:
+                pass
+            raise
         new_state = json.dumps(ctx.storage_state())
+        LAST_PAGE["state"] = new_state
         browser.close()
 
+    if counts.get("All", 0) > 0 and not orders:
+        raise RuntimeError("Portal par orders hain par list se 0 padhe gaye - data nahi bheja")
     # "More views" wale status (RTO In Transit, Exception...) orders list se gin kar jodo
     for o in orders:
         if o["status"] and o["status"] not in counts:
@@ -263,14 +334,15 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        msg = f"{type(e).__name__}: {str(e)[:300]}"
+        msg = f"{type(e).__name__}: {str(e)[:500]}"
+        shot = LAST_PAGE["shot"]  # fail ke waqt ka screenshot (sirf dashboard par, public log mein nahi)
         try:
-            api("/api/ingest", {"error": msg, "error_code": "ERROR"})
+            api("/api/ingest", {"error": msg, "error_code": "ERROR", "shot": shot, "state": LAST_PAGE["state"]})
         except Exception:
             pass
         import urllib.error
         if isinstance(e, urllib.error.HTTPError):
             print(f"failed: Worker ne HTTP {e.code} diya ({e.url.split('?')[0]})")
         else:
-            print("failed:", msg[:200])
+            print("failed:", msg.split(" | Page text:")[0][:200])
         sys.exit(1)
