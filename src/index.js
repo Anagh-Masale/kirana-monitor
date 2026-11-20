@@ -135,6 +135,20 @@ async function route(req, env) {
   if (p === "/api/notify/latest")
     return Response.json(await env.DB.prepare("SELECT id,ts,kind,title,body FROM notifications ORDER BY id DESC LIMIT 1").first());
   if (p === "/api/fastpoll" && post) return Response.json(await directNewOrderPoll(env));
+  if (p === "/api/login/start" && post) {
+    const { email } = await req.json().catch(() => ({}));
+    if (!email || !/@/.test(email)) return Response.json({ ok: false, error: "Sahi email daaliye" });
+    return Response.json(await loginStart(env, String(email).trim()).catch((e) => ({ ok: false, error: String(e).slice(0, 120) })));
+  }
+  if (p === "/api/login/verify" && post) {
+    const { email, code } = await req.json().catch(() => ({}));
+    if (!email || !code) return Response.json({ ok: false, error: "Email aur OTP dono daaliye" });
+    return Response.json(await loginVerify(env, String(email).trim(), String(code).trim()).catch((e) => ({ ok: false, error: String(e).slice(0, 120) })));
+  }
+  if (p === "/api/ask" && post) {
+    const { q } = await req.json().catch(() => ({}));
+    return Response.json({ answer: await askBot(env, q || "").catch(() => "Abhi jawab nahi de paya.") });
+  }
   if (p === "/api/order") {
     const id = url.searchParams.get("id");
     if (!id) return new Response("no id", { status: 400 });
@@ -541,6 +555,9 @@ async function directNewOrderPoll(env) {
   if (setC.length) cookie = mergeSetCookies(cookie, setC);
   await setSetting(env, "GW_COOKIE", cookie);
   await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: true }));
+  // insights/ratings bhi taaza rakho (har ~25 min) — cookie yahan valid hai
+  const insTs = JSON.parse((await getSetting(env, "insights")) || "null")?.ts || 0;
+  if (now - insTs > 25 * 60000) { await fetchInsights(env).catch(() => {}); await fetchRatings(env).catch(() => {}); }
   const orders = j.data.data || [];
   // Har order ka detail (address etc.) store/update karo — order details ke liye
   await ensureDetailCol(env);
@@ -589,6 +606,87 @@ async function directNewOrderPoll(env) {
   await sendMail(env, `[Kirana Club] 🆕 NEW ORDER: ${items.map((o) => "#" + o.id).slice(0, 3).join(", ")} – ${time}`,
     emailHtml({ kind: "report", firstRun: false, changes, metrics: pm, prevMetrics: pm, statusCounts: pc, env, now }), "order");
   return { ok: true, new: items.length };
+}
+
+const GW_HEADERS = {
+  "content-type": "application/json", accept: "application/json, text/plain, */*",
+  origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+};
+function readSetCookies(res, jar) {
+  const sc = typeof res.headers.getSetCookie === "function"
+    ? res.headers.getSetCookie()
+    : res.headers.get("set-cookie") ? [res.headers.get("set-cookie")] : [];
+  for (const s of sc) {
+    const f = (s || "").split(";")[0]; const i = f.indexOf("=");
+    if (i > 0) { const n = f.slice(0, i).trim(), v = f.slice(i + 1).trim(); if (v && v.toLowerCase() !== "deleted") jar.set(n, v); }
+  }
+}
+async function jarFetch(jar, url, opts) {
+  const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  const res = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), ...(cookie ? { cookie } : {}) } });
+  readSetCookies(res, jar);
+  return res;
+}
+
+// In-app Gmail+OTP login: OTP bhejta hai
+async function loginStart(env, email) {
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  const r = await fetch(base + "/dlg/auth/b2b/seller/login", { method: "POST", headers: GW_HEADERS, body: JSON.stringify({ identifier: email, email }) });
+  const j = await r.json().catch(() => null);
+  if (r.status === 200 && j && j.status) { await setSetting(env, "seller_email", email); return { ok: true, masked: j.data?.masked_phone || "", channel: j.data?.channel || "email" }; }
+  return { ok: false, error: (j && j.status) || `HTTP ${r.status}` };
+}
+// OTP verify karke session cookies capture + store karta hai
+async function loginVerify(env, email, code) {
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  const sup = env.SUP_BASE || "https://supplier.kirana.club";
+  const jar = new Map();
+  let csrf = "";
+  try { const cr = await jarFetch(jar, sup + "/api/auth/csrf", { headers: { accept: "application/json" } }); csrf = (await cr.json().catch(() => null))?.csrfToken || ""; } catch (_) {}
+  const co = await jarFetch(jar, base + "/dlg/auth/b2b/seller/confirm-otp", { method: "POST", headers: GW_HEADERS, body: JSON.stringify({ identifier: email, email, code: String(code) }) });
+  const coj = await co.json().catch(() => null);
+  if (co.status !== 200 || !coj || !/success/i.test(coj.status || "")) return { ok: false, error: (coj && coj.status) || "OTP galat ya expire ho gaya" };
+  const user = coj.data?.user;
+  if (user && csrf) {
+    try {
+      const form = new URLSearchParams({ email, userData: JSON.stringify(user), csrfToken: csrf, callbackUrl: sup + "/login", json: "true" });
+      await jarFetch(jar, sup + "/api/auth/callback/credentials", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: sup, referer: sup + "/login", "user-agent": GW_HEADERS["user-agent"] }, body: form.toString() });
+    } catch (_) {}
+  }
+  const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  if (!cookie) return { ok: false, error: "Login cookies capture nahi hui" };
+  await setSetting(env, "KC_STATE", cookie);
+  await setSetting(env, "GW_COOKIE", cookie);
+  await setSetting(env, "failing", "");
+  await setSetting(env, "seller_email", email);
+  const test = await directNewOrderPoll(env).catch(() => ({ ok: false }));
+  return { ok: true, working: !!test.ok };
+}
+
+// AI assistant — humare apne data se jawab (free, reliable)
+async function askBot(env, q) {
+  const text = String(q || "").toLowerCase();
+  const d = await loadDashboard(env);
+  const counts = d.latest?.counts || {};
+  const metrics = d.latest?.metrics || {};
+  const orders = d.orders || [];
+  const ins = d.insights?.items || [];
+  const byStatus = (re) => orders.filter((o) => re.test((o.status || "").toLowerCase()));
+  const listOrders = (arr) => arr.slice(0, 12).map((o) => `#${o.id}${o.customer ? " · " + o.customer : ""}${o.amount != null ? " · ₹" + o.amount : ""}`).join("\n") || "—";
+  if (/\bndr\b/.test(text)) { const a = byStatus(/ndr/); return `🔴 NDR orders: ${a.length}\n${listOrders(a)}`; }
+  if (/\brto\b/.test(text)) { const a = byStatus(/rto/); return `🔴 RTO orders: ${a.length}\n${listOrders(a)}`; }
+  if (/cancel/.test(text)) { const a = byStatus(/cancel/); return `⚪ Cancelled: ${a.length}\n${listOrders(a)}`; }
+  if (/transit|raaste|way/.test(text)) { const a = byStatus(/transit/); return `🚚 In Transit: ${a.length}\n${listOrders(a)}`; }
+  if (/deliver/.test(text)) { const a = byStatus(/deliver/); return `✅ Delivered orders (list mein): ${a.length}\n${listOrders(a)}`; }
+  if (/(top|best|sabse).*(bik|sell|product)|kaunsa.*product|product.*performance/.test(text) && ins.length) {
+    return `📊 Top products (units, 30 din):\n` + ins.slice(0, 6).map((p) => `${p.rank}. ${p.name} — ${p.units} units, ${p.orders} orders${p.oos ? " (OUT OF STOCK)" : ""}`).join("\n");
+  }
+  if (/stock|khatam/.test(text)) { const o = ins.filter((p) => p.oos); return o.length ? `⚠️ Out of stock:\n` + o.map((p) => `• ${p.name}`).join("\n") : "✅ Koi product out of stock nahi."; }
+  if (/aaj|today/.test(text)) return `Aaj: Sales ${metrics["Today's Sales"] != null ? "₹" + Number(metrics["Today's Sales"]).toLocaleString("en-IN") : "–"}, Orders ${metrics["Today's orders"] ?? "–"}`;
+  if (/sale|revenue|kamai|bikri|total/.test(text)) return Object.entries(metrics).map(([k, v]) => `${k}: ${typeof v === "number" && /sale|value/i.test(k) ? "₹" + Number(v).toLocaleString("en-IN") : v}`).join("\n") || "Abhi data load nahi hua.";
+  if (/kitne|order|status/.test(text)) return Object.entries(counts).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}: ${n}`).join("\n") || "Abhi data nahi.";
+  return "Main aapke data se ye bata sakta hoon:\n• NDR / RTO / Cancelled / In Transit / Delivered orders\n• Aaj ki sale, total sale\n• Top products, out of stock\n\nPoochhiye jaise: \"kaunse order NDR hue\", \"top product kaunsa\", \"aaj kitni sale\", \"kya out of stock hai\".";
 }
 
 async function gwPost(env, path, body) {

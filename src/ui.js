@@ -70,9 +70,9 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .drow .k{color:var(--muted)}.drow .v{text-align:right;font-weight:600;max-width:65%}
 .addr{background:var(--bg);border-radius:10px;padding:12px;font-size:14px;line-height:1.5;margin:10px 0}
 .lnk{display:inline-block;margin:4px 8px 0 0;padding:7px 12px;border-radius:9px;background:var(--ink);color:#fff;text-decoration:none;font-size:13px;font-weight:600}
-.toast{position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-140%);transition:transform .35s ease;z-index:50;
+.toast{position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-16px);opacity:0;visibility:hidden;pointer-events:none;transition:transform .35s ease,opacity .3s ease;z-index:50;
 background:#1E1914;color:#fff;border-radius:14px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25);width:min(92vw,420px)}
-.toast.show{transform:translateX(-50%) translateY(0)}.toast b{display:block;font-size:15px;margin-bottom:3px}.toast span{font-size:13.5px;opacity:.85;white-space:pre-line}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible;pointer-events:auto}.toast b{display:block;font-size:15px;margin-bottom:3px}.toast span{font-size:13.5px;opacity:.85;white-space:pre-line}
 .toast.order{background:#1E7F55}
 .pushbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
 .pushbar .sub{flex:1;min-width:200px}
@@ -240,6 +240,22 @@ function showSec(s){document.querySelectorAll(".sec").forEach(function(e){e.clas
 function filterOrders(el,st){document.querySelectorAll("#sec-orders .fchip").forEach(function(c){c.classList.toggle("on",c===el);});
   document.querySelectorAll("#obody tr").forEach(function(r){r.style.display=(!st||r.dataset.st===st)?"":"none";});}
 try{var _s=localStorage.getItem("kcsec");if(_s&&document.getElementById("sec-"+_s))showSec(_s);}catch(_){}
+async function loginStart(){var e=(document.getElementById("lgEmail").value||"").trim();var m=document.getElementById("lgMsg");var b=document.getElementById("lgBtn1");
+ if(!e){m.textContent="Email daaliye";return;}b.disabled=true;m.textContent="OTP bhej rahe hain…";
+ try{var r=await (await fetch("/api/login/start",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:e})})).json();
+ if(r.ok){document.getElementById("lgStep1").style.display="none";document.getElementById("lgStep2").style.display="block";m.textContent="OTP aapke email"+(r.masked?" / phone "+r.masked:"")+" par bheja gaya. Daaliye.";}
+ else{m.textContent="Nahi bheja: "+(r.error||"error");b.disabled=false;}}catch(err){m.textContent="Error: "+err.message;b.disabled=false;}}
+async function loginVerify(){var e=(document.getElementById("lgEmail").value||"").trim();var c=(document.getElementById("lgCode").value||"").trim();var m=document.getElementById("lgMsg");var b=document.getElementById("lgBtn2");
+ if(!c){m.textContent="OTP daaliye";return;}b.disabled=true;m.textContent="Login kar rahe hain…";
+ try{var r=await (await fetch("/api/login/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:e,code:c})})).json();
+ if(r.ok){m.textContent="✅ Login ho gaya"+(r.working?", data bhi aa raha hai":"")+". Refresh ho raha hai…";setTimeout(function(){location.href="/";},1500);}
+ else{m.textContent="❌ "+(r.error||"login fail");b.disabled=false;}}catch(err){m.textContent="Error: "+err.message;b.disabled=false;}}
+function addChat(who,txt){var log=document.getElementById("chatlog");if(!log)return null;var d=document.createElement("div");
+ d.style.cssText=who==="me"?"align-self:flex-end;background:#1E1914;color:#fff;padding:9px 13px;border-radius:14px 14px 3px 14px;max-width:85%;white-space:pre-line;font-size:14px":"align-self:flex-start;background:#F0EADF;padding:9px 13px;border-radius:14px 14px 14px 3px;max-width:88%;white-space:pre-line;font-size:14px";
+ d.textContent=txt;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
+async function ask(){var i=document.getElementById("chatin");var q=(i.value||"").trim();if(!q)return;i.value="";addChat("me",q);var ph=addChat("bot","…");
+ try{var r=await (await fetch("/api/ask",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({q:q})})).json();if(ph)ph.textContent=r.answer||"—";}
+ catch(e){if(ph)ph.textContent="Jawab nahi mila.";}var log=document.getElementById("chatlog");if(log)log.scrollTop=log.scrollHeight;}
 async function openOrder(id){
   const sh=document.getElementById("sheet");
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:30px 0;text-align:center;color:#7B7168">Loading #'+esc(id)+'…</div>';
@@ -302,6 +318,34 @@ setInterval(async()=>{try{const j=await (await fetch("/api/data",{cache:"no-stor
  else if(runTs>KC.lastRun){location.reload();}
 }catch(_){}},60000);
 `;
+
+function loginForm() {
+  return `<div id="loginBox" style="display:grid;gap:9px">
+    <div class="sub" style="color:var(--ink)">Gmail se login karein — OTP aapke email par aayega. Laptop/cookie ki zaroorat nahi.</div>
+    <input id="lgEmail" type="email" inputmode="email" placeholder="aapka@gmail.com"
+      style="font:inherit;padding:11px 12px;border-radius:10px;border:1px solid var(--line)">
+    <div id="lgStep1"><button onclick="loginStart()" id="lgBtn1">OTP bhejein</button></div>
+    <div id="lgStep2" style="display:none;gap:9px">
+      <input id="lgCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Email par aaya OTP"
+        style="font:inherit;padding:11px 12px;border-radius:10px;border:1px solid var(--line);width:100%;margin-bottom:9px">
+      <button onclick="loginVerify()" id="lgBtn2">Verify &amp; login</button>
+    </div>
+    <div id="lgMsg" class="sub" style="color:var(--ink)"></div>
+  </div>`;
+}
+
+function chatSection(t) {
+  return `<h2 style="margin:0 0 4px">💬 Assistant</h2>
+    <div class="sub" style="margin-bottom:12px">Apne orders ke baare mein poochhiye — NDR, aaj ki sale, top product, out of stock, waghairah.</div>
+    <div class="card" style="display:flex;flex-direction:column;height:66vh">
+      <div id="chatlog" style="flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px;padding-bottom:10px"></div>
+      <div style="display:flex;gap:8px;border-top:1px solid var(--line);padding-top:10px">
+        <input id="chatin" placeholder="Poochhiye…" onkeydown="if(event.key==='Enter')ask()"
+          style="flex:1;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line)">
+        <button onclick="ask()">Send</button>
+      </div>
+    </div>`;
+}
 
 function sessionForm() {
   return `<form method="post" action="/session" style="display:grid;gap:8px">
@@ -391,7 +435,7 @@ export function dashboardPage(d, env, lang) {
     ? `<div class="banner bad"><b>${d.failing === "SESSION" ? "Kirana Club login expire ho gaya." : d.failing === "CONFIG" ? "Portal connection abhi set nahi hai." : "Pichhla check fail hua."}</b>
        ${lr && !lr.ok ? `<div class="sub" style="color:inherit;opacity:.85;margin-top:4px;word-break:break-word">${esc(lr.error)}</div>` : ""}
        ${lr && !lr.ok && d.errorShotTs && Math.abs(d.errorShotTs - lr.ts) < 10 * 60000 ? `<div style="margin-top:8px"><a href="/error-shot" target="_blank" style="color:inherit;font-weight:700">📸 Fail ke waqt portal ka screenshot dekhiye</a></div>` : ""}
-       ${d.failing === "SESSION" || d.failing === "CONFIG" ? sessionForm() : ""}</div>`
+       ${d.failing === "SESSION" || d.failing === "CONFIG" ? `<div style="margin-top:10px">${loginForm()}</div>` : ""}</div>`
     : "";
 
   const ordersTable = rows
@@ -410,12 +454,12 @@ export function dashboardPage(d, env, lang) {
   </div>
   <div class="menu" id="menu"><div class="bg" onclick="toggleMenu(0)"></div><div class="panel">
     <div class="mh"><div class="mark" style="width:30px;height:30px;border-radius:8px;font-size:11px">KC</div><b>${t("menu")}</b></div>
-    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("settings", "⚙️", t("settings"))}
+    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("assistant", "💬", "Assistant")}${menuA("settings", "⚙️", t("settings"))}
   </div></div>
   <div class="wrap">
   ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 min mein naya data aayega.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
   ${failBanner}
-  ${!d.lastRun ? `<div class="banner demo"><b>Pehla setup:</b> login cookies paste kariye.${sessionForm()}</div>` : ""}
+  ${!d.lastRun ? `<div class="banner demo"><b>Pehla setup — Gmail se login kariye:</b><div style="margin-top:10px">${loginForm()}</div></div>` : ""}
 
   <div class="sec on" id="sec-home">
     <div class="meta">
@@ -449,6 +493,8 @@ export function dashboardPage(d, env, lang) {
     <div class="card">${ratingsView(d, t)}</div>
   </div>
 
+  <div class="sec" id="sec-assistant">${chatSection(t)}</div>
+
   <div class="sec" id="sec-settings">
     <h2 style="margin:0 0 14px">${t("settings")}</h2>
     <div class="card pushbar" style="margin-bottom:14px">
@@ -460,7 +506,8 @@ export function dashboardPage(d, env, lang) {
     <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center">
       <b>${t("language")}</b>
       <div class="langtog"><a href="/lang?set=hi" class="${lang === "hi" ? "on" : ""}">Hinglish</a><a href="/lang?set=en" class="${lang === "en" ? "on" : ""}">English</a></div></div></div>
-    <div class="card"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Session / login</div>${sessionForm()}</div>
+    <div class="card"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Login</div>${loginForm()}
+      <details style="margin-top:14px"><summary class="sub" style="cursor:pointer">Advanced: cookie se login (laptop)</summary><div style="margin-top:10px">${sessionForm()}</div></details></div>
     <footer><a href="/logout"><button class="ghost" type="button">${t("logout")}</button></a></footer>
   </div>
 
