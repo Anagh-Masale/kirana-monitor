@@ -25,11 +25,12 @@ button:active{transform:translateY(1px)}
 .banner.bad{background:var(--bad-bg);color:#7D2219}
 .banner form{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .banner input{flex:1;min-width:220px;font:inherit;padding:9px 12px;border-radius:10px;border:1px solid #E7C8C2;background:#fff}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
-.kpi .l{color:var(--muted);font-size:13px}
-.kpi .v{font-size:26px;font-weight:700;letter-spacing:-.5px;margin-top:4px;font-variant-numeric:tabular-nums}
-.kpi .d{font-size:12.5px;margin-top:4px;font-weight:600;color:var(--muted)}
+.card.kpi{padding:15px 16px}
+.kpi .l{color:var(--muted);font-size:12.5px;font-weight:600;line-height:1.25}
+.kpi .v{font-size:26px;font-weight:800;letter-spacing:-.5px;margin-top:5px;font-variant-numeric:tabular-nums}
+.kpi .d{font-size:12px;margin-top:5px;font-weight:700;color:var(--muted)}
 .kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--bad)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;font-size:13.5px;font-weight:600}
@@ -102,7 +103,7 @@ details.card summary::-webkit-details-marker{display:none}
 .cl li{display:grid;grid-template-columns:62px 1fr auto;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;align-items:baseline}
 .cl a{color:var(--info);font-weight:600;text-decoration:none;white-space:nowrap}
 footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
-@media(max-width:600px){.kpi .v{font-size:22px}.hide-sm{display:none}}
+@media(max-width:600px){.wrap{padding:16px 12px 40px}.kpis{grid-template-columns:1fr 1fr;gap:10px}.card.kpi{padding:13px}.kpi .v{font-size:21px;margin-top:3px}.kpi .l{font-size:11.5px}.hide-sm{display:none}.meta{gap:4px 12px;margin:10px 0 14px}.chips{gap:6px;margin-bottom:16px}.chip{padding:6px 10px;font-size:12.5px}.chip b{font-size:14px}}
 .topbar{position:sticky;top:0;z-index:40;background:rgba(246,243,238,.92);backdrop-filter:blur(8px);display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
 .burger{background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink);padding:3px 7px;border-radius:8px;line-height:1}
 .topttl{font-weight:700;font-size:15px;line-height:1}.topttl span{display:block;color:var(--muted);font-size:11.5px;font-weight:500}
@@ -119,6 +120,8 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .filters{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
 .fchip{padding:7px 12px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;white-space:nowrap}
 .fchip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.fchip.fnew{border-color:var(--new);color:var(--new);background:var(--new-bg)}
+.fchip.fnew.on{background:var(--new);color:#fff;border-color:var(--new)}
 .scrolllist{max-height:68vh;overflow:auto;margin:0 -8px}
 .lead{list-style:none;margin:0;padding:0}
 .lead li{display:grid;grid-template-columns:26px 1fr auto;gap:10px;padding:11px 2px;border-bottom:1px solid var(--line);align-items:center}
@@ -127,6 +130,17 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .lead .nm{font-weight:600;font-size:14px;line-height:1.25}.lead .m2{color:var(--muted);font-size:12.5px;margin-top:2px}
 .lead .u{text-align:right}.lead .u b{font-size:15px;font-variant-numeric:tabular-nums}
 .oosb{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10.5px;font-weight:700;background:var(--bad-bg);color:var(--bad);margin-left:6px;vertical-align:middle}
+.ihead{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:2px 0 12px}
+.idiv{height:1px;background:var(--line);margin:18px 0}
+.ibars{display:flex;flex-direction:column;gap:11px}
+.ibar{display:grid;grid-template-columns:38% 1fr 40px;gap:10px;align-items:center}
+.ibl{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ibt{background:var(--mute-bg);border-radius:7px;height:18px;overflow:hidden}
+.ibf{height:100%;background:var(--accent);border-radius:7px;min-width:3px;transition:width .5s ease}
+.ibf.oos{background:var(--bad)}
+.ibv{text-align:right;font-weight:800;font-size:13.5px;font-variant-numeric:tabular-nums}
+.oosdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--bad);vertical-align:middle;margin-left:3px}
+@media(max-width:600px){.ibar{grid-template-columns:42% 1fr 34px;gap:8px}.ibl{font-size:12px}}
 .up{color:var(--good)}.down{color:var(--bad)}
 .rsum{display:flex;align-items:center;gap:16px;margin-bottom:8px}.rsum .big{font-size:40px;font-weight:800;line-height:1}
 .stars{color:#E0A100;font-size:18px;letter-spacing:2px}
@@ -177,6 +191,7 @@ const TR = {
   tapDetail: { hi: "Order par tap karke poora detail dekhein", en: "Tap an order for full details" },
   insSub: { hi: "Pichhle 30 din · kaunsa product kitna bika", en: "Last 30 days · product performance" },
   units: { hi: "units", en: "units" }, ordLabel: { hi: "orders", en: "orders" }, oos: { hi: "Out of stock", en: "Out of stock" },
+  topByUnits: { hi: "Top products — units bike", en: "Top products — units sold" }, allProducts: { hi: "Saare products", en: "All products" },
   noIns: { hi: "Sales insights abhi load nahi hua — agle 30-min check mein aa jayega.", en: "Sales insights not loaded yet — coming next 30-min check." },
   avgRating: { hi: "Average rating", en: "Average rating" }, reviewsL: { hi: "reviews", en: "reviews" }, ratingsL: { hi: "ratings", en: "ratings" },
   noRatings: { hi: "Abhi tak koi rating nahi aayi. Jaise hi customer rating denge, yahan dikhega.", en: "No ratings yet. They'll show here once customers rate." },
@@ -197,11 +212,11 @@ function health(d, t) {
 }
 
 function delta(label, cur, prev, t) {
-  if (typeof cur !== "number" || typeof prev !== "number") return `<div class="d">&nbsp;</div>`;
+  if (typeof cur !== "number" || typeof prev !== "number") return "";
   const diff = cur - prev;
-  if (!diff) return `<div class="d">${t("sameAsLast")}</div>`;
-  const s = (diff > 0 ? "+" : "−") + fmtVal(label, Math.abs(diff));
-  return `<div class="d ${diff > 0 ? "up" : "down"}">${s} ${t("fromLast")}</div>`;
+  if (!diff) return "";
+  const s = (diff > 0 ? "▲ +" : "▼ −") + fmtVal(label, Math.abs(diff));
+  return `<div class="d ${diff > 0 ? "up" : "down"}">${s}</div>`;
 }
 
 function chart(dayList, now) {
@@ -386,7 +401,17 @@ function sessionForm() {
 function insightsView(d, t) {
   const ins = d.insights;
   if (!ins || !ins.items || !ins.items.length) return `<div class="empty">${t("noIns")}</div>`;
-  return `<ul class="lead">${ins.items.map((p) => {
+  const top = ins.items.slice(0, 8);
+  const max = Math.max(1, ...top.map((p) => Number(p.units) || 0));
+  const bars = `<div class="ibars">${top.map((p) => {
+    const u = Number(p.units) || 0;
+    const pct = Math.max(3, Math.round((u / max) * 100));
+    const nm = p.name || p.code || "";
+    return `<div class="ibar"><div class="ibl" title="${esc(nm)}">${esc(nm)}${p.oos ? ` <span class="oosdot" title="Out of stock"></span>` : ""}</div>
+      <div class="ibt"><div class="ibf${p.oos ? " oos" : ""}" style="width:${pct}%"></div></div>
+      <div class="ibv">${u}</div></div>`;
+  }).join("")}</div>`;
+  const list = `<ul class="lead">${ins.items.map((p) => {
     const down = p.dir === "down" || (typeof p.change === "number" && p.change < 0);
     const ch = p.change != null && p.change !== 0 ? `<span class="${down ? "down" : "up"}">${p.change > 0 ? "+" : ""}${p.change}%</span>` : "";
     return `<li><span class="rk">${p.rank || ""}</span>
@@ -394,6 +419,7 @@ function insightsView(d, t) {
       <div class="m2">${p.orders || 0} ${t("ordLabel")}${p.mrp ? " · ₹" + p.mrp : ""}${ch ? " · " + ch : ""}</div></div>
       <div class="u"><b>${p.units || 0}</b><div class="m2">${t("units")}</div></div></li>`;
   }).join("")}</ul>`;
+  return `<div class="ihead">${t("topByUnits")}</div>${bars}<div class="idiv"></div><div class="ihead">${t("allProducts")}</div>${list}`;
 }
 
 function stars(n) {
@@ -449,12 +475,15 @@ export function dashboardPage(d, env, lang) {
       <td class="n">${o.amount != null ? "₹" + Number(o.amount).toLocaleString("en-IN") : "–"}</td>
       <td class="n hide-sm sub">${esc(ago(o.updated_at, d.now))}</td></tr>`).join("");
 
-  // filters: statuses present in orders, ordered
-  const stSet = [...new Set(d.orders.map((o) => o.status).filter(Boolean))]
+  // filters: Confirmed/new pinned first (always, even 0) so new orders are easy to check, then statuses present
+  const present = [...new Set(d.orders.map((o) => o.status).filter(Boolean))];
+  const rest = present.filter((s) => !/^confirmed$/i.test(s))
     .sort((a, b) => order.indexOf(statusTone(a)) - order.indexOf(statusTone(b)));
+  const stSet = ["Confirmed", ...rest];
   const filters = `<div class="filters"><span class="fchip on" data-f="" onclick="filterOrders(this,'')">${t("filterAll")} ${d.orders.length}</span>${stSet.map((s) => {
     const n = d.orders.filter((o) => o.status === s).length;
-    return `<span class="fchip" data-f="${esc(s)}" onclick="filterOrders(this,'${esc(s)}')">${esc(s)} ${n}</span>`;
+    const isNew = /^confirmed$/i.test(s);
+    return `<span class="fchip${isNew ? " fnew" : ""}" data-f="${esc(s)}" onclick="filterOrders(this,'${esc(s)}')">${isNew ? "🆕 " : ""}${esc(s)} ${n}</span>`;
   }).join("")}</div>`;
 
   const c = chart(d.orderDays, d.now);

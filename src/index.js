@@ -355,7 +355,7 @@ async function loadDashboard(env) {
     q("SELECT * FROM runs ORDER BY ts DESC LIMIT 1").first(),
     q("SELECT ts,metrics,status_counts FROM runs WHERE ok=1 ORDER BY ts DESC LIMIT 2").all(),
     q("SELECT id,ts,type,title FROM events ORDER BY id DESC LIMIT 150").all(),
-    q("SELECT id,status,amount,customer,city,placed_at,payment,first_seen,updated_at FROM orders ORDER BY updated_at DESC, CAST(id AS INTEGER) DESC LIMIT 300").all(),
+    q("SELECT id,status,amount,customer,city,placed_at,payment,first_seen,updated_at FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 300").all(),
     q("SELECT placed_at, first_seen FROM orders ORDER BY first_seen DESC LIMIT 3000").all(),
     q("SELECT ok FROM runs WHERE ts > ?", now - 864e5).all(),
     getSetting(env, "failing"),
