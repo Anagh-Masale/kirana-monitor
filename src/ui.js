@@ -83,6 +83,33 @@ details.card summary::-webkit-details-marker{display:none}
 .cl a{color:var(--info);font-weight:600;text-decoration:none;white-space:nowrap}
 footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:600px){.kpi .v{font-size:22px}.hide-sm{display:none}}
+.topbar{position:sticky;top:0;z-index:40;background:rgba(246,243,238,.92);backdrop-filter:blur(8px);display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.burger{background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink);padding:3px 7px;border-radius:8px;line-height:1}
+.topttl{font-weight:700;font-size:15px;line-height:1}.topttl span{display:block;color:var(--muted);font-size:11.5px;font-weight:500}
+.langtog{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12px;font-weight:700;background:#fff}
+.langtog a{padding:5px 10px;color:var(--muted);text-decoration:none}.langtog a.on{background:var(--ink);color:#fff}
+.menu{position:fixed;inset:0;z-index:70;display:none}.menu.show{display:block}
+.menu .bg{position:absolute;inset:0;background:rgba(30,25,20,.4)}
+.menu .panel{position:absolute;left:0;top:0;bottom:0;width:min(80vw,290px);background:#fff;padding:16px;transform:translateX(-100%);transition:transform .25s;overflow:auto}
+.menu.show .panel{transform:none}
+.menu .panel .mh{display:flex;align-items:center;gap:10px;margin:4px 6px 14px}
+.menu .panel a{display:flex;align-items:center;gap:12px;padding:12px 10px;border-radius:10px;color:var(--ink);text-decoration:none;font-weight:600;font-size:15px;cursor:pointer}
+.menu .panel a.on{background:var(--bg)}.menu .panel a .ic{font-size:18px;width:22px;text-align:center}
+.sec{display:none}.sec.on{display:block}
+.filters{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+.fchip{padding:7px 12px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;white-space:nowrap}
+.fchip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.scrolllist{max-height:68vh;overflow:auto;margin:0 -8px}
+.lead{list-style:none;margin:0;padding:0}
+.lead li{display:grid;grid-template-columns:26px 1fr auto;gap:10px;padding:11px 2px;border-bottom:1px solid var(--line);align-items:center}
+.lead li:last-child{border-bottom:0}
+.lead .rk{color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums;text-align:center}
+.lead .nm{font-weight:600;font-size:14px;line-height:1.25}.lead .m2{color:var(--muted);font-size:12.5px;margin-top:2px}
+.lead .u{text-align:right}.lead .u b{font-size:15px;font-variant-numeric:tabular-nums}
+.oosb{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10.5px;font-weight:700;background:var(--bad-bg);color:var(--bad);margin-left:6px;vertical-align:middle}
+.up{color:var(--good)}.down{color:var(--bad)}
+.rsum{display:flex;align-items:center;gap:16px;margin-bottom:8px}.rsum .big{font-size:40px;font-weight:800;line-height:1}
+.stars{color:#E0A100;font-size:18px;letter-spacing:2px}
 `;
 
 const page = (title, body, refresh = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -109,20 +136,52 @@ export function loginPage(error) {
   </div></div>`);
 }
 
-function health(d) {
+const TR = {
+  sub: { hi: "Anagh Masale · supplier portal", en: "Anagh Masale · supplier portal" },
+  home: { hi: "Home", en: "Home" }, orders: { hi: "Orders", en: "Orders" },
+  insights: { hi: "Sales Insights", en: "Sales Insights" }, ratings: { hi: "Ratings", en: "Ratings" },
+  settings: { hi: "Settings", en: "Settings" }, menu: { hi: "Menu", en: "Menu" },
+  live: { hi: "Live", en: "Live" }, checkNow: { hi: "Check karo", en: "Check now" },
+  waiting: { hi: "Pehle check ka intezaar", en: "Waiting for first check" },
+  loginExp: { hi: "Login expire", en: "Login expired" }, error: { hi: "Error", en: "Error" }, late: { hi: "Check late hai", en: "Check late" },
+  lastCheck: { hi: "Last check", en: "Last check" },
+  full: { hi: "Har 30 min full check · raat 12–7:30 band", en: "Full check every 30 min · 12am–7:30am off" },
+  rtOn: { hi: "⚡ Real-time new-order on", en: "⚡ Real-time new-order on" }, rtOff: { hi: "⚡ Real-time: browser lane par", en: "⚡ Real-time: browser lane" },
+  checksOk: { hi: "checks successful (24 ghante)", en: "checks successful (24h)" },
+  notifPrompt: { hi: "Is device par phone notifications on karein (naya order, status, alerts)", en: "Turn on phone notifications on this device (new order, status, alerts)" },
+  notifOn: { hi: "Notifications on karein", en: "Turn on notifications" }, test: { hi: "Test bhejein", en: "Send test" },
+  notifOnState: { hi: "✅ Is device par notifications on hain", en: "✅ Notifications on for this device" },
+  activity: { hi: "Activity", en: "Activity" }, activitySub: { hi: "Kya kab badla", en: "What changed when" },
+  perDay: { hi: "Orders per day", en: "Orders per day" }, last14: { hi: "Pichhle 14 din", en: "Last 14 days" },
+  allOrdersN: { hi: "Portal par", en: "On portal" }, noOrders: { hi: "Abhi koi order nahi", en: "No orders yet" }, noAct: { hi: "Abhi koi activity nahi", en: "No activity yet" },
+  tapDetail: { hi: "Order par tap karke poora detail dekhein", en: "Tap an order for full details" },
+  insSub: { hi: "Pichhle 30 din · kaunsa product kitna bika", en: "Last 30 days · product performance" },
+  units: { hi: "units", en: "units" }, ordLabel: { hi: "orders", en: "orders" }, oos: { hi: "Out of stock", en: "Out of stock" },
+  noIns: { hi: "Sales insights abhi load nahi hua — agle 30-min check mein aa jayega.", en: "Sales insights not loaded yet — coming next 30-min check." },
+  avgRating: { hi: "Average rating", en: "Average rating" }, reviewsL: { hi: "reviews", en: "reviews" }, ratingsL: { hi: "ratings", en: "ratings" },
+  noRatings: { hi: "Abhi tak koi rating nahi aayi. Jaise hi customer rating denge, yahan dikhega.", en: "No ratings yet. They'll show here once customers rate." },
+  language: { hi: "Language", en: "Language" }, logout: { hi: "Logout", en: "Logout" },
+  colOrder: { hi: "Order", en: "Order" }, colStatus: { hi: "Status", en: "Status" }, colAmount: { hi: "Amount", en: "Amount" }, colUpd: { hi: "Updated", en: "Updated" },
+  sameAsLast: { hi: "Pichhle check jaisa", en: "Same as last check" }, fromLast: { hi: "pichhle check se", en: "vs last check" },
+  filterAll: { hi: "Sabhi", en: "All" }, noData: { hi: "Pehla check hone par numbers aayenge", en: "Numbers appear after first check" },
+  notifTitle: { hi: "Notifications", en: "Notifications" },
+};
+function tt(lang) { return (k) => (TR[k] ? TR[k][lang] || TR[k].hi : k); }
+
+function health(d, t) {
   const lr = d.lastRun;
-  if (!lr) return { tone: "warn", text: "Pehle check ka intezaar" };
-  if (!lr.ok) return { tone: "bad", text: lr.error_code === "SESSION" ? "Login expired" : "Error" };
-  if (d.now - lr.ts > 45 * 60000) return { tone: "warn", text: "Check late hai" };
-  return { tone: "good", text: "Live" };
+  if (!lr) return { tone: "warn", text: t("waiting") };
+  if (!lr.ok) return { tone: "bad", text: lr.error_code === "SESSION" ? t("loginExp") : t("error") };
+  if (d.now - lr.ts > 45 * 60000) return { tone: "warn", text: t("late") };
+  return { tone: "good", text: t("live") };
 }
 
-function delta(label, cur, prev) {
+function delta(label, cur, prev, t) {
   if (typeof cur !== "number" || typeof prev !== "number") return `<div class="d">&nbsp;</div>`;
   const diff = cur - prev;
-  if (!diff) return `<div class="d">Pichhle check jaisa</div>`;
+  if (!diff) return `<div class="d">${t("sameAsLast")}</div>`;
   const s = (diff > 0 ? "+" : "−") + fmtVal(label, Math.abs(diff));
-  return `<div class="d ${diff > 0 ? "up" : "down"}">${s} pichhle check se</div>`;
+  return `<div class="d ${diff > 0 ? "up" : "down"}">${s} ${t("fromLast")}</div>`;
 }
 
 function chart(dayList, now) {
@@ -174,6 +233,13 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 function rupee(n){return n==null?"–":"₹"+Number(n).toLocaleString("en-IN");}
 function closeOrder(){document.getElementById("ovl").classList.remove("show");}
 function fmtISO(s){if(!s)return"";var m=/(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(s);if(!m)return s;var mon=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m[2]-1];var h=+m[4],ap=h<12?"am":"pm";h=h%12||12;return m[3]+" "+mon+", "+h+":"+m[5]+" "+ap;}
+function toggleMenu(open){var m=document.getElementById("menu");if(m)m.classList[open?"add":"remove"]("show");}
+function showSec(s){document.querySelectorAll(".sec").forEach(function(e){e.classList.toggle("on",e.id==="sec-"+s);});
+  document.querySelectorAll(".menu .panel a").forEach(function(a){a.classList.toggle("on",a.dataset.sec===s);});
+  try{localStorage.setItem("kcsec",s);}catch(_){}toggleMenu(0);window.scrollTo(0,0);}
+function filterOrders(el,st){document.querySelectorAll("#sec-orders .fchip").forEach(function(c){c.classList.toggle("on",c===el);});
+  document.querySelectorAll("#obody tr").forEach(function(r){r.style.display=(!st||r.dataset.st===st)?"":"none";});}
+try{var _s=localStorage.getItem("kcsec");if(_s&&document.getElementById("sec-"+_s))showSec(_s);}catch(_){}
 async function openOrder(id){
   const sh=document.getElementById("sheet");
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:30px 0;text-align:center;color:#7B7168">Loading #'+esc(id)+'…</div>';
@@ -245,8 +311,43 @@ function sessionForm() {
     <div><button>Save &amp; check now</button></div></form>`;
 }
 
-export function dashboardPage(d, env) {
-  const h = health(d);
+function insightsView(d, t) {
+  const ins = d.insights;
+  if (!ins || !ins.items || !ins.items.length) return `<div class="empty">${t("noIns")}</div>`;
+  return `<ul class="lead">${ins.items.map((p) => {
+    const down = p.dir === "down" || (typeof p.change === "number" && p.change < 0);
+    const ch = p.change != null && p.change !== 0 ? `<span class="${down ? "down" : "up"}">${p.change > 0 ? "+" : ""}${p.change}%</span>` : "";
+    return `<li><span class="rk">${p.rank || ""}</span>
+      <div><div class="nm">${esc(p.name || p.code || "")}${p.oos ? `<span class="oosb">${t("oos")}</span>` : ""}</div>
+      <div class="m2">${p.orders || 0} ${t("ordLabel")}${p.mrp ? " · ₹" + p.mrp : ""}${ch ? " · " + ch : ""}</div></div>
+      <div class="u"><b>${p.units || 0}</b><div class="m2">${t("units")}</div></div></li>`;
+  }).join("")}</ul>`;
+}
+
+function stars(n) {
+  n = Math.round(Number(n) || 0);
+  return `<span class="stars">${"★".repeat(n)}${"☆".repeat(5 - n)}</span>`;
+}
+function ratingsView(d, t) {
+  const r = d.ratings, sum = r && r.summary, prods = (r && r.products) || [];
+  const totalReviews = sum ? sum.total_reviews || 0 : 0;
+  const avg = sum ? sum.average_rating || 0 : 0;
+  let head = `<div class="rsum"><div class="big">${avg ? Number(avg).toFixed(1) : "–"}</div>
+    <div>${stars(avg)}<div class="sub">${sum ? (sum.total_ratings || 0) + " " + t("ratingsL") + " · " + totalReviews + " " + t("reviewsL") : t("noRatings")}</div></div></div>`;
+  if (!totalReviews && !prods.some((p) => p.reviews)) head += `<div class="empty">${t("noRatings")}</div>`;
+  const plist = prods.length
+    ? `<ul class="lead" style="margin-top:12px">${prods.map((p) => `<li><span class="rk">${p.rating ? Number(p.rating).toFixed(1) : "–"}</span>
+      <div><div class="nm">${esc(p.name || p.code || "")}${p.oos ? `<span class="oosb">${t("oos")}</span>` : ""}</div>
+      <div class="m2">${p.reviews || 0} ${t("reviewsL")}${p.mrp ? " · ₹" + p.mrp : ""}</div></div>
+      <div class="u">${p.rating ? stars(p.rating) : ""}</div></li>`).join("")}</ul>`
+    : "";
+  return head + plist;
+}
+
+export function dashboardPage(d, env, lang) {
+  lang = lang === "en" ? "en" : "hi";
+  const t = tt(lang);
+  const h = health(d, t);
   const lr = d.lastRun;
   const metrics = d.latest?.metrics || {};
   const prev = d.previous?.metrics || {};
@@ -254,8 +355,8 @@ export function dashboardPage(d, env) {
 
   const kpis = Object.keys(metrics).length
     ? Object.entries(metrics).map(([k, v]) => `<div class="card kpi"><div class="l">${esc(k)}</div>
-        <div class="v">${esc(fmtVal(k, v))}</div>${delta(k, v, prev[k])}</div>`).join("")
-    : `<div class="card kpi"><div class="l">Data</div><div class="v">–</div><div class="d">Pehla successful check hone par yahan numbers aayenge</div></div>`;
+        <div class="v">${esc(fmtVal(k, v))}</div>${delta(k, v, prev[k], t)}</div>`).join("")
+    : `<div class="card kpi"><div class="l">Data</div><div class="v">–</div><div class="d">${t("noData")}</div></div>`;
 
   const order = ["new", "info", "warn", "good", "bad", "mute"];
   const chips = Object.entries(counts)
@@ -270,13 +371,22 @@ export function dashboardPage(d, env) {
     tl += `<li class="ev"><time>${fmtTime(e.ts)}</time><span class="dot ${esc(e.type)}"></span><span>${esc(e.title)}</span></li>`;
   }
 
-  const rows = d.orders.map((o) => `<tr class="orow" onclick="openOrder('${esc(o.id)}')" title="Details ke liye tap karein">
+  const rows = d.orders.map((o) => `<tr class="orow" data-st="${esc(o.status)}" onclick="openOrder('${esc(o.id)}')">
       <td><b>#${esc(o.id)}</b><div class="sub">${esc(o.customer || "")}${o.city ? ", " + esc(o.city) : ""}${o.placed_at && !/^\d{4}-/.test(o.placed_at) ? " · " + esc(o.placed_at) : ""}</div></td>
       <td><span class="tag t-${statusTone(o.status)}">${esc(o.status)}</span>${o.payment ? `<div class="sub" style="margin-top:4px">${esc(o.payment)}</div>` : ""}</td>
       <td class="n">${o.amount != null ? "₹" + Number(o.amount).toLocaleString("en-IN") : "–"}</td>
       <td class="n hide-sm sub">${esc(ago(o.updated_at, d.now))}</td></tr>`).join("");
 
+  // filters: statuses present in orders, ordered
+  const stSet = [...new Set(d.orders.map((o) => o.status).filter(Boolean))]
+    .sort((a, b) => order.indexOf(statusTone(a)) - order.indexOf(statusTone(b)));
+  const filters = `<div class="filters"><span class="fchip on" data-f="" onclick="filterOrders(this,'')">${t("filterAll")} ${d.orders.length}</span>${stSet.map((s) => {
+    const n = d.orders.filter((o) => o.status === s).length;
+    return `<span class="fchip" data-f="${esc(s)}" onclick="filterOrders(this,'${esc(s)}')">${esc(s)} ${n}</span>`;
+  }).join("")}</div>`;
+
   const c = chart(d.orderDays, d.now);
+  const totalAll = Object.entries(counts).find(([s]) => /^all$/i.test(s));
   const failBanner = d.failing
     ? `<div class="banner bad"><b>${d.failing === "SESSION" ? "Kirana Club login expire ho gaya." : d.failing === "CONFIG" ? "Portal connection abhi set nahi hai." : "Pichhla check fail hua."}</b>
        ${lr && !lr.ok ? `<div class="sub" style="color:inherit;opacity:.85;margin-top:4px;word-break:break-word">${esc(lr.error)}</div>` : ""}
@@ -284,48 +394,77 @@ export function dashboardPage(d, env) {
        ${d.failing === "SESSION" || d.failing === "CONFIG" ? sessionForm() : ""}</div>`
     : "";
 
-  const totalAll = Object.entries(counts).find(([s]) => /^all$/i.test(s));
-  const body = `<div class="wrap">
-  <header>
-    <div class="mark">KC</div>
-    <div class="title"><h1>Kirana Club Tracker</h1><p>Anagh Masale · supplier portal</p></div>
+  const ordersTable = rows
+    ? `${filters}<div class="scrolllist"><table><thead><tr><th>${t("colOrder")}</th><th>${t("colStatus")}</th><th style="text-align:right">${t("colAmount")}</th><th class="hide-sm" style="text-align:right">${t("colUpd")}</th></tr></thead><tbody id="obody">${rows}</tbody></table></div>`
+    : `<div class="empty">${t("noOrders")}</div>`;
+
+  const menuA = (sec, ic, label, on) => `<a data-sec="${sec}" class="${on ? "on" : ""}" onclick="showSec('${sec}')"><span class="ic">${ic}</span>${label}</a>`;
+
+  const body = `<div class="topbar">
+    <button class="burger" onclick="toggleMenu(1)" aria-label="Menu">☰</button>
+    <div class="mark" style="width:32px;height:32px;border-radius:9px;font-size:12px">KC</div>
+    <div class="topttl">Kirana Club Tracker<span>${t("sub")}</span></div>
     <div class="spacer"></div>
+    <div class="langtog"><a href="/lang?set=hi" class="${lang === "hi" ? "on" : ""}">HI</a><a href="/lang?set=en" class="${lang === "en" ? "on" : ""}">EN</a></div>
     <span class="pill ${h.tone}"><i></i>${h.text}</span>
-    <form method="post" action="/run" style="margin:0"><button>Check now</button></form>
-  </header>
-  <div class="meta">
-    <span>Last check <b>${lr ? `${fmtTime(lr.ts)}` : "–"}</b>${lr ? ` (${ago(lr.ts, d.now)})` : ""}</span>
-    <span>Har <b>30 min</b> full check · raat 12–7:30 band</span>
-    ${d.fast ? `<span>${d.fast.ok ? "⚡ <b>Real-time</b> new-order on" : "⚡ Real-time: browser lane par"}</span>` : ""}
-    <span>24 ghante mein <b>${d.runs24h.ok}/${d.runs24h.total}</b> checks successful</span>
   </div>
-  <div class="card pushbar">
-    <span style="font-size:20px">🔔</span>
-    <div class="sub" id="pushState" style="color:var(--ink)">Phone notifications: is device par on kariye (naya order, status change, alerts)</div>
-    <button id="pushBtn" onclick="enablePush()">Notifications on kariye</button>
-    <button id="pushTest" class="ghost" style="display:none" onclick="testPush()">Test bhejiye</button>
-  </div>
-  ${d.demo ? `<div class="banner demo"><b>Demo mode.</b> Ye sample data hai taaki aap system ko chalta hua dekh sakein. Portal adapter lagte hi asli Kirana Club data aayega.</div>` : ""}
-  ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 minute mein naya data aa jayega, page apne aap refresh hoga.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
+  <div class="menu" id="menu"><div class="bg" onclick="toggleMenu(0)"></div><div class="panel">
+    <div class="mh"><div class="mark" style="width:30px;height:30px;border-radius:8px;font-size:11px">KC</div><b>${t("menu")}</b></div>
+    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("settings", "⚙️", t("settings"))}
+  </div></div>
+  <div class="wrap">
+  ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 min mein naya data aayega.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
   ${failBanner}
-  ${!d.lastRun && !d.demo ? `<div class="banner demo"><b>Pehla setup:</b> neeche login cookies paste kariye.${sessionForm()}</div>` : ""}
-  <div class="kpis">${kpis}</div>
-  ${chips ? `<div class="chips">${chips}</div>` : ""}
-  <div class="grid">
-    <section class="card"><h2>Activity <small>Kya kab badla</small></h2>
-      <ul class="tl">${tl || '<li class="empty">Abhi koi activity nahi</li>'}</ul></section>
-    <div style="display:grid;gap:16px;align-content:start">
-      <section class="card chart"><h2>Orders per day <small>Pichhle 14 din · ${c.total} orders</small></h2>${c.svg}</section>
-      <section class="card"><h2>Orders <small>${totalAll ? `Portal par ${totalAll[1]} orders · ` : ""}Latest update upar</small></h2>
-        ${rows ? `<div class="tablewrap"><table><thead><tr><th>Order</th><th>Status</th><th style="text-align:right">Amount</th><th class="hide-sm" style="text-align:right">Updated</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">Abhi koi order nahi</div>'}
-      </section>
+  ${!d.lastRun ? `<div class="banner demo"><b>Pehla setup:</b> login cookies paste kariye.${sessionForm()}</div>` : ""}
+
+  <div class="sec on" id="sec-home">
+    <div class="meta">
+      <span>${t("lastCheck")} <b>${lr ? fmtTime(lr.ts) : "–"}</b>${lr ? ` (${ago(lr.ts, d.now)})` : ""}</span>
+      <span>${t("full")}</span>
+      ${d.fast ? `<span>${d.fast.ok ? t("rtOn") : t("rtOff")}</span>` : ""}
+      <span><b>${d.runs24h.ok}/${d.runs24h.total}</b> ${t("checksOk")}</span>
     </div>
+    <div class="kpis">${kpis}</div>
+    ${chips ? `<div class="chips">${chips}</div>` : ""}
+    <section class="card chart" style="margin-bottom:16px"><h2>${t("perDay")} <small>${t("last14")} · ${c.total} orders</small></h2>${c.svg}</section>
+    <section class="card"><h2>${t("activity")} <small>${t("activitySub")}</small></h2>
+      <ul class="tl">${tl || `<li class="empty">${t("noAct")}</li>`}</ul></section>
   </div>
-  <footer>
-    ${d.demo ? `<form method="post" action="/reset" onsubmit="return confirm('Saara stored data delete hoga. Pakka?')" style="margin:0"><button class="ghost">Clear data</button></form>` : ""}
-    <a href="/logout"><button class="ghost" type="button">Logout</button></a>
-  </footer>
-</div>
+
+  <div class="sec" id="sec-orders">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h2 style="margin:0">${t("orders")} <small>${totalAll ? `${t("allOrdersN")} ${totalAll[1]}` : ""}</small></h2>
+      <form method="post" action="/run" style="margin:0"><button>${t("checkNow")}</button></form>
+    </div>
+    <div class="card">${ordersTable}</div>
+  </div>
+
+  <div class="sec" id="sec-insights">
+    <h2 style="margin:0 0 4px">${t("insights")}</h2><div class="sub" style="margin-bottom:14px">${t("insSub")}</div>
+    <div class="card">${insightsView(d, t)}</div>
+  </div>
+
+  <div class="sec" id="sec-ratings">
+    <h2 style="margin:0 0 14px">${t("ratings")}</h2>
+    <div class="card">${ratingsView(d, t)}</div>
+  </div>
+
+  <div class="sec" id="sec-settings">
+    <h2 style="margin:0 0 14px">${t("settings")}</h2>
+    <div class="card pushbar" style="margin-bottom:14px">
+      <span style="font-size:20px">🔔</span>
+      <div class="sub" id="pushState" style="color:var(--ink)">${t("notifPrompt")}</div>
+      <button id="pushBtn" onclick="enablePush()">${t("notifOn")}</button>
+      <button id="pushTest" class="ghost" style="display:none" onclick="testPush()">${t("test")}</button>
+    </div>
+    <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center">
+      <b>${t("language")}</b>
+      <div class="langtog"><a href="/lang?set=hi" class="${lang === "hi" ? "on" : ""}">Hinglish</a><a href="/lang?set=en" class="${lang === "en" ? "on" : ""}">English</a></div></div></div>
+    <div class="card"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Session / login</div>${sessionForm()}</div>
+    <footer><a href="/logout"><button class="ghost" type="button">${t("logout")}</button></a></footer>
+  </div>
+
+  </div>
 <div class="toast" id="toast"><b id="tT"></b><span id="tB"></span></div>
 <div class="ovl" id="ovl" onclick="if(event.target===this)closeOrder()"><div class="sheet" style="position:relative" id="sheet"></div></div>
 <script>window.KC={lastEvent:${Number(d.lastEvent?.id || 0)},lastRun:${Number(d.lastRun?.ts || 0)},devices:${Number(d.pushDevices || 0)}};</script>

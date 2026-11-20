@@ -156,7 +156,14 @@ async function route(req, env) {
     const r = await env.DB.prepare("SELECT id,ts,type,title FROM events WHERE id > ? ORDER BY id ASC LIMIT 20").bind(after).all();
     return Response.json({ events: r.results });
   }
-  if (p === "/") return html(dashboardPage({ ...(await loadDashboard(env)), queued: url.searchParams.has("queued") }, env));
+  if (p === "/lang") {
+    const l = url.searchParams.get("set") === "en" ? "en" : "hi";
+    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": `lang=${l}; Path=/; Max-Age=${365 * 86400}; SameSite=Lax` } });
+  }
+  if (p === "/") {
+    const lang = /(?:^|;\s*)lang=en/.test(req.headers.get("cookie") || "") ? "en" : "hi";
+    return html(dashboardPage({ ...(await loadDashboard(env)), queued: url.searchParams.has("queued") }, env, lang));
+  }
   return new Response("Not found", { status: 404 });
 }
 
@@ -360,6 +367,8 @@ async function loadDashboard(env) {
     lastEvent,
     pushDevices: (await env.DB.prepare("SELECT COUNT(*) n FROM push_subs").first())?.n || 0,
     fast: JSON.parse((await getSetting(env, "fast_status")) || "null"),
+    insights: JSON.parse((await getSetting(env, "insights")) || "null"),
+    ratings: JSON.parse((await getSetting(env, "ratings")) || "null"),
     lastCleanup: Number(await getSetting(env, "last_cleanup")) || null,
     errorShotTs: JSON.parse((await getSetting(env, "last_error_shot")) || "null")?.ts || null,
   };
@@ -582,6 +591,52 @@ async function directNewOrderPoll(env) {
   return { ok: true, new: items.length };
 }
 
+async function gwPost(env, path, body) {
+  const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  if (!cookie) return null;
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  try {
+    const res = await fetch(base + path, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json", accept: "application/json, text/plain, */*",
+        origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        cookie,
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 200) return null;
+    return await res.json();
+  } catch (_) { return null; }
+}
+
+async function fetchInsights(env) {
+  const j = await gwPost(env, "/dlg/auth/v1/b2b/sales-insights/v2/sku-leaderboard",
+    { data: { date_range: "30d", order_type: "ALL", seller: [], limit: 50, offset: 0, sort_by: "units_sold", sort_direction: "desc" } });
+  const items = j?.data?.sku_leaderboard?.items;
+  if (!Array.isArray(items)) return;
+  const clean = items.map((p) => ({
+    rank: p.rank, code: p.sku_code, name: p.sku_name, qty: p.quantity, mrp: p.mrp,
+    units: p.units_sold, orders: p.orders, change: p.change_percent, dir: p.change_type,
+    oos: /oos|out/i.test(String(p.product_status || "")),
+  }));
+  await setSetting(env, "insights", JSON.stringify({ ts: Date.now(), range: "30d", items: clean }));
+}
+
+async function fetchRatings(env) {
+  const email = (await getSetting(env, "seller_email")) || "";
+  const sum = await gwPost(env, "/dlg/auth/v1/b2b/ratings/get_sellers_ratings_summary",
+    { seller: [], time_range: 30, updated_by: email, request_source: "B2B_EXTERNAL" });
+  const prods = await gwPost(env, "/dlg/auth/v1/b2b/ratings/get_sellers_products_ratings",
+    { seller: [], updated_by: email, request_source: "B2B_EXTERNAL" });
+  const out = { ts: Date.now(), summary: sum?.data || null, products: (prods?.data?.products || []).map((p) => ({
+    name: p.product_name, code: p.product_code, mrp: p.mrp, oos: p.is_oos,
+    rating: p.average_rating, ratings: p.total_ratings, reviews: p.total_reviews,
+  })) };
+  if (out.summary || out.products.length) await setSetting(env, "ratings", JSON.stringify(out));
+}
+
 async function dispatch(env) {
   const r = await fetch(`https://api.github.com/repos/${env.GH_REPO}/dispatches`, {
     method: "POST",
@@ -627,6 +682,8 @@ async function cronTick(env) {
       emailHtml({ kind: "error", code: "STALE", message: `Pichhle ${mins} minute se koi check complete nahi hua. GitHub Actions ka run dekhiye.`, env, now }), "alert");
     await pushNotify(env, "alert", "⚠️ Monitor ruka hua hai", `${mins} min se koi check nahi hua`);
   }
+  await fetchInsights(env).catch(() => {});
+  await fetchRatings(env).catch(() => {});
   await dispatch(env);
 }
 
