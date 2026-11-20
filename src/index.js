@@ -132,6 +132,7 @@ async function route(req, env) {
     return Response.json(await pushNotify(env, "order", "🆕 Test: New order #123456 · ₹960", "Ramesh Kirana, Patna · COD\nNotifications sahi chal rahe hain ✅"));
   if (p === "/api/notify/latest")
     return Response.json(await env.DB.prepare("SELECT id,ts,kind,title,body FROM notifications ORDER BY id DESC LIMIT 1").first());
+  if (p === "/api/fastpoll" && post) return Response.json(await directNewOrderPoll(env));
   if (p === "/api/data") return Response.json(await loadDashboard(env));
   if (p === "/api/latest") {
     const after = Number(url.searchParams.get("after") || 0);
@@ -341,6 +342,7 @@ async function loadDashboard(env) {
     cleanup,
     lastEvent,
     pushDevices: (await env.DB.prepare("SELECT COUNT(*) n FROM push_subs").first())?.n || 0,
+    fast: JSON.parse((await getSetting(env, "fast_status")) || "null"),
     lastCleanup: Number(await getSetting(env, "last_cleanup")) || null,
     errorShotTs: JSON.parse((await getSetting(env, "last_error_shot")) || "null")?.ts || null,
   };
@@ -359,6 +361,117 @@ function placedDay(s, now) {
 }
 
 // ---------------- GitHub collector trigger + watchdog ----------------
+// ---------------- Fast lane: seedhe gateway API se real-time new orders ----------------
+const GW_ORDERS = "/dlg/auth/v1/b2b/get_orders";
+
+function cookieHeaderFromState(stateStr) {
+  if (!stateStr) return null;
+  stateStr = stateStr.trim();
+  if (stateStr.startsWith("{")) {
+    try {
+      const st = JSON.parse(stateStr);
+      if (Array.isArray(st.cookies))
+        return st.cookies
+          .filter((c) => (c.domain || "").includes("kirana.club"))
+          .map((c) => `${c.name}=${c.value}`)
+          .join("; ");
+    } catch (_) {}
+    return null;
+  }
+  return stateStr.replace(/^cookie:\s*/i, "").trim();
+}
+
+function niceStatus(s) {
+  if (!s) return "Unknown";
+  const map = {
+    IN_TRANSIT: "In Transit", DELIVERED: "Delivered", CANCELLED: "Cancelled",
+    SHIPMENT_CREATED: "Shipment Created", CONFIRMED: "Confirmed", NDR: "NDR",
+    RTO_DELIVERED: "RTO Delivered", RTO_IN_TRANSIT: "RTO In Transit", RTO_OTHERS: "RTO",
+    RETURNED: "Returned", OUT_FOR_DELIVERY: "Out For Delivery",
+  };
+  return map[s] || s.split("_").map((w) => w[0] + w.slice(1).toLowerCase()).join(" ");
+}
+
+async function directNewOrderPoll(env) {
+  const now = Date.now();
+  const cookie = cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  if (!cookie) return { ok: false, reason: "no-cookie" };
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  let res, text;
+  try {
+    res = await fetch(base + GW_ORDERS, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/plain, */*",
+        origin: "https://supplier.kirana.club",
+        referer: "https://supplier.kirana.club/",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        cookie,
+      },
+      body: JSON.stringify({
+        status: [], limit: 50, offset: 0, from: now - 3 * 864e5, to: now + 6e5,
+        user_id: "", order_amount: { min: 0, max: 10000000 }, courier: [], source: ["KC"], warehouse: [],
+      }),
+    });
+    text = await res.text();
+  } catch (e) {
+    await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: false, err: "fetch-fail" }));
+    return { ok: false, reason: "fetch-fail" };
+  }
+  let j = null;
+  try { j = JSON.parse(text); } catch (_) {}
+  if (res.status !== 200 || !j || j.status !== "OK" || !j.data) {
+    // Server se block / login expire — chup-chaap, browser lane cover karega
+    await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: false, status: res.status }));
+    return { ok: false, reason: "bad-response", status: res.status };
+  }
+  await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: true }));
+  const orders = j.data.data || [];
+  const existing = new Set((await env.DB.prepare("SELECT id FROM orders").all()).results.map((r) => r.id));
+  if (existing.size === 0) return { ok: true, seeded: 0 }; // baseline browser lane banayega
+  const fresh = orders.filter((o) => o.order_id != null && !existing.has(String(o.order_id)));
+  if (!fresh.length) return { ok: true, new: 0 };
+
+  const mk = (o) => {
+    const id = String(o.order_id);
+    const amount = num(o.total);
+    const status = niceStatus(o.display_status || o.delivery_status);
+    const customer = o.address_name || o.store_name || "";
+    const city = o.address_city || (o.user && o.user.district) || "";
+    const payment = o.payment_mode === "COD" ? "COD" : o.advance_taken ? "Partially Paid" : o.payment_mode || "";
+    return { id, amount, status, customer, city, payment, placedAt: o.order_date || null };
+  };
+  const items = fresh.map(mk);
+  const stmts = [];
+  for (const o of items) {
+    stmts.push(
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO orders(id,status,amount,customer,city,placed_at,payment,first_seen,updated_at,history) VALUES(?,?,?,?,?,?,?,?,?,?)"
+      ).bind(o.id, o.status, o.amount, o.customer || null, o.city || null, o.placedAt, o.payment || null, now, now, JSON.stringify([{ s: o.status, t: now }]))
+    );
+    stmts.push(
+      env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "new_order", describe({ type: "new_order", ...o }))
+    );
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+
+  // Notification + mail (new order = dono, aapke rule ke hisaab se)
+  const title = items.length === 1
+    ? `🆕 New order #${items[0].id} · ${inr(items[0].amount)}`
+    : `🆕 ${items.length} naye orders · ${inr(items.reduce((a, x) => a + (x.amount || 0), 0))}`;
+  const body = items.slice(0, 5).map((o) => `#${o.id} ${inr(o.amount)}${o.customer ? " · " + o.customer : ""}${o.payment ? " · " + o.payment : ""}`).join("\n");
+  await pushNotify(env, "order", title, body);
+  const prev = await env.DB.prepare("SELECT metrics,status_counts FROM runs WHERE ok=1 ORDER BY ts DESC LIMIT 1").first();
+  const pm = prev ? JSON.parse(prev.metrics || "{}") : {};
+  const pc = prev ? JSON.parse(prev.status_counts || "{}") : {};
+  const time = new Date(now).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
+  const changes = items.map((o) => ({ type: "new_order", ...o }));
+  await sendMail(env, `[Kirana Club] 🆕 NEW ORDER: ${items.map((o) => "#" + o.id).slice(0, 3).join(", ")} – ${time}`,
+    emailHtml({ kind: "report", firstRun: false, changes, metrics: pm, prevMetrics: pm, statusCounts: pc, env, now }), "order");
+  return { ok: true, new: items.length };
+}
+
 async function dispatch(env) {
   const r = await fetch(`https://api.github.com/repos/${env.GH_REPO}/dispatches`, {
     method: "POST",
@@ -383,6 +496,13 @@ const isQuiet = (ts) => istMinutes(ts) < 7 * 60 + 30;
 async function cronTick(env) {
   const now = Date.now();
   if (isQuiet(now)) return; // raat: silent
+
+  // FAST LANE: har tick (5 min) seedhe API se new order check — real-time alert
+  await directNewOrderPoll(env).catch(() => {});
+
+  // HEAVY LANE (browser, full data): sirf har 30 min (:00 aur :30 ke paas)
+  if (istMinutes(now) % 30 >= 5) return;
+
   await env.DB.prepare("DELETE FROM runs WHERE ts < ?").bind(now - 90 * 864e5).run();
   await env.DB.prepare("DELETE FROM events WHERE ts < ? AND type IN ('metric','info')").bind(now - 180 * 864e5).run();
   await ensureCleanupTable(env);

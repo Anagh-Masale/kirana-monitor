@@ -6,7 +6,7 @@ compatibility_date = "2026-11-01"
 routes = [{ pattern = "track.anaghmasale.com", custom_domain = true }]
 
 [triggers]
-crons = ["*/30 * * * *"]   # har 30 minute
+crons = ["*/5 * * * *"]   # har 5 min (fast new-order); heavy browser lane har 30 min
 
 [[d1_databases]]
 binding = "DB"
@@ -16,7 +16,7 @@ database_id = "ffaa57f3-e16c-41d4-9182-59bd1c2e6a72"
 [vars]
 MAIL_FROM = "Kirana Monitor <noreply@anaghmasale.com>"
 # Kaunse status par MAIL bhi aaye (baaki sab sirf app notification). NDR/RTO bhi chahiye to: "deliver,ndr,rto"
-MAIL_STATUSES = "deliver,ndr,rto"
+MAIL_STATUSES = "deliver"
 DASHBOARD_URL = "https://track.anaghmasale.com"
 GH_REPO = "Anagh-Masale/kirana-monitor"   # aapka GitHub repo (owner/name)
 DEMO = "0"

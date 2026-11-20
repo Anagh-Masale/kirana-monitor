@@ -252,7 +252,8 @@ export function dashboardPage(d, env) {
   </header>
   <div class="meta">
     <span>Last check <b>${lr ? `${fmtTime(lr.ts)}` : "–"}</b>${lr ? ` (${ago(lr.ts, d.now)})` : ""}</span>
-    <span>Har <b>30 min</b> auto-check · raat 12–7:30 band</span>
+    <span>Har <b>30 min</b> full check · raat 12–7:30 band</span>
+    ${d.fast ? `<span>${d.fast.ok ? "⚡ <b>Real-time</b> new-order on" : "⚡ Real-time: browser lane par"}</span>` : ""}
     <span>24 ghante mein <b>${d.runs24h.ok}/${d.runs24h.total}</b> checks successful</span>
   </div>
   <div class="card pushbar">
