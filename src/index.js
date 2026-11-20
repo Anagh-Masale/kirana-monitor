@@ -28,6 +28,7 @@ async function route(req, env) {
     const body = await req.json();
     if (body.state) {
       await setSetting(env, "KC_STATE", body.state);
+      await setSetting(env, "GW_COOKIE", cookieHeaderFromState(body.state) || ""); // fresh cookie se fast-lane reset
       delete body.state;
     }
     if (body.error) {
@@ -104,6 +105,7 @@ async function route(req, env) {
     const t = String(f.get("token") || "").trim();
     if (t) {
       await setSetting(env, "KC_STATE", t);
+      await setSetting(env, "GW_COOKIE", cookieHeaderFromState(t) || "");
       await setSetting(env, "failing", "");
       if (env.GH_REPO) await dispatch(env);
       else await runCheck(env, "manual");
@@ -392,9 +394,27 @@ function niceStatus(s) {
   return map[s] || s.split("_").map((w) => w[0] + w.slice(1).toLowerCase()).join(" ");
 }
 
+function mergeSetCookies(header, setCookieArr) {
+  const map = new Map();
+  (header || "").split(";").forEach((p) => {
+    const i = p.indexOf("="); if (i < 1) return;
+    map.set(p.slice(0, i).trim(), p.slice(i + 1).trim());
+  });
+  for (const sc of setCookieArr || []) {
+    const first = (sc || "").split(";")[0];
+    const i = first.indexOf("="); if (i < 1) continue;
+    const name = first.slice(0, i).trim(), val = first.slice(i + 1).trim();
+    if (!val || val.toLowerCase() === "deleted") { map.delete(name); continue; }
+    map.set(name, val);
+  }
+  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
 async function directNewOrderPoll(env) {
   const now = Date.now();
-  const cookie = cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  // GW_COOKIE: continuously-refreshed gateway cookie; har browser refresh par reset hoti hai
+  let cookie = await getSetting(env, "GW_COOKIE");
+  if (!cookie) cookie = cookieHeaderFromState(await getSetting(env, "KC_STATE"));
   if (!cookie) return { ok: false, reason: "no-cookie" };
   const cookieNames = cookie.split(";").map((c) => c.split("=")[0].trim()).filter(Boolean);
   const base = env.GW_BASE || "https://gateway.kirana.club";
@@ -420,6 +440,10 @@ async function directNewOrderPoll(env) {
     await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: false, err: "fetch-fail" }));
     return { ok: false, reason: "fetch-fail" };
   }
+  // Rotated cookie capture — token ko continuously taaza rakhta hai
+  const setC = typeof res.headers.getSetCookie === "function"
+    ? res.headers.getSetCookie()
+    : res.headers.get("set-cookie") ? [res.headers.get("set-cookie")] : [];
   let j = null;
   try { j = JSON.parse(text); } catch (_) {}
   if (res.status !== 200 || !j || j.status !== "OK" || !j.data) {
@@ -428,6 +452,9 @@ async function directNewOrderPoll(env) {
     await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: false, status: res.status, body: snippet }));
     return { ok: false, reason: "bad-response", status: res.status, body: snippet, cookieCount: cookieNames.length, cookieNames: cookieNames.slice(0, 25) };
   }
+  // kaam karne wali cookie persist karo + rotation merge karo (continuously fresh)
+  if (setC.length) cookie = mergeSetCookies(cookie, setC);
+  await setSetting(env, "GW_COOKIE", cookie);
   await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: true }));
   const orders = j.data.data || [];
   const existing = new Set((await env.DB.prepare("SELECT id FROM orders").all()).results.map((r) => r.id));
