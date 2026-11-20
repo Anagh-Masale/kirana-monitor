@@ -164,6 +164,51 @@ async function route(req, env) {
       detail: row.detail ? JSON.parse(row.detail) : null, extra,
     });
   }
+  if (p === "/api/stock/set" && post) {
+    const b = await req.json().catch(() => ({}));
+    if (!b.product_id) return new Response("no product", { status: 400 });
+    await ensureInventory(env);
+    const cur = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(String(b.product_id)).first();
+    if (!cur) return Response.json({ ok: false, error: "not-found" });
+    const units = b.units != null ? Math.round(Number(b.units)) : cur.units;
+    const min_qty = b.min_qty != null ? Math.max(1, Math.round(Number(b.min_qty))) : cur.min_qty;
+    const threshold = b.threshold != null ? Math.max(0, Math.round(Number(b.threshold))) : cur.threshold;
+    const tracking = b.tracking != null ? (b.tracking ? 1 : 0) : cur.tracking;
+    const auto_oos = b.auto_oos != null ? (b.auto_oos ? 1 : 0) : cur.auto_oos;
+    await env.DB.prepare("UPDATE inventory SET units=?, min_qty=?, threshold=?, tracking=?, auto_oos=?, status=?, updated_at=? WHERE product_id=?")
+      .bind(units, min_qty, threshold, tracking, auto_oos, invStatus(units, threshold), Date.now(), String(b.product_id)).run();
+    return Response.json({ ok: true });
+  }
+  if (p === "/api/stock/oos" && post) {
+    const b = await req.json().catch(() => ({}));
+    if (!b.product_id) return new Response("no product", { status: 400 });
+    await ensureInventory(env);
+    const inv = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(String(b.product_id)).first();
+    if (!inv) return Response.json({ ok: false });
+    if (b.when === "now" || !b.when) {
+      await env.DB.prepare("UPDATE inventory SET units=0, status='oos', oos_at=NULL, updated_at=? WHERE product_id=?").bind(Date.now(), String(b.product_id)).run();
+      await alertInventory(env, [{ ...inv, units: 0, after: 0, to: "oos" }]);
+      const portal = await markOOSOnPortal(env, inv);
+      return Response.json({ ok: true, portal });
+    }
+    const when = Number(b.when);
+    await env.DB.prepare("UPDATE inventory SET oos_at=?, updated_at=? WHERE product_id=?").bind(when > 0 ? when : null, Date.now(), String(b.product_id)).run();
+    return Response.json({ ok: true, scheduled: when });
+  }
+  if (p === "/api/stock/discover" && post) {
+    await ensureInventory(env);
+    const ords = (await env.DB.prepare("SELECT id FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 25").all()).results;
+    let found = 0;
+    for (const o of ords) {
+      const lines = await fetchOrderLines(env, o.id).catch(() => []);
+      for (const ln of lines) {
+        const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+          .bind(ln.product_id, ln.product_id, ln.name || "", 0, 1, 5, "in_stock", 0, Date.now()).run();
+        if (r.meta && r.meta.changes) found++;
+      }
+    }
+    return Response.json({ ok: true, found });
+  }
   if (p === "/api/data") return Response.json(await loadDashboard(env));
   if (p === "/api/latest") {
     const after = Number(url.searchParams.get("after") || 0);
@@ -298,6 +343,11 @@ async function processSnapshot(env, snap, source) {
   // D1 batch limit se bachne ke liye chunks
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
 
+  // Inventory: naye orders se stock ghatao (idempotent), cancel par units wapas
+  const invNewIds = changes.filter((c) => c.type === "new_order").map((c) => c.id);
+  if (invNewIds.length) await applyInventoryForNewOrders(env, invNewIds).catch(() => {});
+  for (const c of changes) if (c.type === "status" && /cancel/i.test(c.to || "")) await restoreInventory(env, c.id).catch(() => {});
+
   await setSetting(env, "stale_alerted", "");
   const wasFailing = await getSetting(env, "failing");
   if (wasFailing) {
@@ -385,7 +435,147 @@ async function loadDashboard(env) {
     ratings: JSON.parse((await getSetting(env, "ratings")) || "null"),
     lastCleanup: Number(await getSetting(env, "last_cleanup")) || null,
     errorShotTs: JSON.parse((await getSetting(env, "last_error_shot")) || "null")?.ts || null,
+    inventory: await inventoryList(env),
+    stockAlert: JSON.parse((await getSetting(env, "stock_alert")) || "null"),
   };
+}
+
+// ================= INVENTORY — apna stock, apne app me (source of truth) =================
+async function ensureInventory(env) {
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory (product_id TEXT PRIMARY KEY, sku TEXT, name TEXT, units INTEGER DEFAULT 0, min_qty INTEGER DEFAULT 1, threshold INTEGER DEFAULT 5, status TEXT DEFAULT 'in_stock', oos_at INTEGER, auto_oos INTEGER DEFAULT 0, tracking INTEGER DEFAULT 0, updated_at INTEGER)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS inv_ledger (order_id TEXT, product_id TEXT, qty INTEGER, ts INTEGER, kind TEXT, PRIMARY KEY(order_id, product_id))`),
+  ]);
+}
+function invStatus(units, threshold) {
+  if (units <= 0) return "oos";
+  if (units <= (Number(threshold) || 0)) return "low";
+  return "in_stock";
+}
+// order ke line items: [{product_id, name, qty}]
+async function fetchOrderLines(env, id) {
+  const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  if (!cookie) return [];
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  const res = await fetch(base + "/dlg/auth/v1/b2b/orders", {
+    method: "POST", headers: { ...GW_HEADERS, cookie },
+    body: JSON.stringify({ data: { order_id: String(id), warehouse: [] }, request_source: "B2B_EXTERNAL" }),
+  }).catch(() => null);
+  if (!res) return [];
+  const j = await res.json().catch(() => null);
+  const d = j && (Array.isArray(j.data) ? j.data[0] : j.data);
+  const od = (d && d.order_details) || {};
+  const cart = Array.isArray(od.cart) ? od.cart : [];
+  const nameById = {};
+  for (const c of cart) if (c && c.product_id != null) nameById[String(c.product_id)] = c.name;
+  const pp = (od.bill_breakup && od.bill_breakup.products_pricing) || [];
+  const lines = [];
+  if (Array.isArray(pp) && pp.length) {
+    for (const p of pp) {
+      if (!p || p.id == null) continue;
+      lines.push({ product_id: String(p.id), name: nameById[String(p.id)] || p.key || p.product_name || "", qty: Number(p.quantity) || Number(p.pack_size) || 1 });
+    }
+  } else {
+    for (const c of cart) if (c && c.product_id != null) lines.push({ product_id: String(c.product_id), name: c.name || "", qty: Number(c.quantity) || 1 });
+  }
+  return lines;
+}
+// Naye orders aane par: product discover + (agar tracked ho to) stock ghatao
+async function applyInventoryForNewOrders(env, ids) {
+  if (!ids || !ids.length) return [];
+  await ensureInventory(env);
+  const already = new Set((await env.DB.prepare("SELECT DISTINCT order_id FROM inv_ledger").all()).results.map((r) => String(r.order_id)));
+  const now = Date.now();
+  const transitions = [];
+  for (const id of ids) {
+    if (already.has(String(id))) continue;
+    const lines = await fetchOrderLines(env, id).catch(() => []);
+    for (const ln of lines) {
+      let inv = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(ln.product_id).first();
+      if (!inv) {
+        // naya product discover — bina tracking ke (user pehle units set karega), koi false OOS nahi
+        await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+          .bind(ln.product_id, ln.product_id, ln.name || "", 0, 1, 5, "in_stock", 0, now).run();
+        continue;
+      }
+      if (inv.name !== ln.name && ln.name)
+        await env.DB.prepare("UPDATE inventory SET name=? WHERE product_id=?").bind(ln.name, ln.product_id).run();
+      if (!inv.tracking) continue; // jab tak user units set na kare, ghatao mat
+      const before = Number(inv.units) || 0;
+      const after = before - (Number(ln.qty) || 0);
+      const os = invStatus(before, inv.threshold), ns = invStatus(after, inv.threshold);
+      await env.DB.prepare("UPDATE inventory SET units=?, status=?, updated_at=? WHERE product_id=?").bind(after, ns, now, ln.product_id).run();
+      await env.DB.prepare("INSERT OR IGNORE INTO inv_ledger(order_id,product_id,qty,ts,kind) VALUES(?,?,?,?,'consume')").bind(String(id), ln.product_id, Number(ln.qty) || 0, now).run();
+      if (ns !== os && (ns === "low" || ns === "oos")) transitions.push({ ...inv, before, after, to: ns });
+    }
+  }
+  if (transitions.length) await alertInventory(env, transitions);
+  return transitions;
+}
+// Cancel hone par units wapas (maal dispatch nahi hua)
+async function restoreInventory(env, id) {
+  await ensureInventory(env);
+  const rows = (await env.DB.prepare("SELECT product_id,qty FROM inv_ledger WHERE order_id=? AND kind='consume'").bind(String(id)).all()).results;
+  for (const r of rows) {
+    await env.DB.prepare("UPDATE inventory SET units=units+?, updated_at=? WHERE product_id=?").bind(Number(r.qty) || 0, Date.now(), r.product_id).run();
+    await env.DB.prepare("UPDATE inv_ledger SET kind='restored' WHERE order_id=? AND product_id=?").bind(String(id), r.product_id).run();
+    const inv = await env.DB.prepare("SELECT units,threshold FROM inventory WHERE product_id=?").bind(r.product_id).first();
+    if (inv) await env.DB.prepare("UPDATE inventory SET status=? WHERE product_id=?").bind(invStatus(inv.units, inv.threshold), r.product_id).run();
+  }
+}
+// Scheduled OOS (user ne time set kiya) + threshold cross — cron me check
+async function checkScheduledOOS(env) {
+  await ensureInventory(env);
+  const now = Date.now();
+  const due = (await env.DB.prepare("SELECT * FROM inventory WHERE oos_at IS NOT NULL AND oos_at>0 AND oos_at<=? AND status!='oos'").bind(now).all()).results;
+  const trans = [];
+  for (const inv of due) {
+    await env.DB.prepare("UPDATE inventory SET units=0, status='oos', oos_at=NULL, updated_at=? WHERE product_id=?").bind(now, inv.product_id).run();
+    trans.push({ ...inv, before: inv.units, after: 0, to: "oos" });
+  }
+  if (trans.length) await alertInventory(env, trans);
+}
+// Alert: mail + push + in-app banner + event; aur gated portal auto-OOS
+async function alertInventory(env, transitions) {
+  if (!transitions || !transitions.length) return;
+  const now = Date.now();
+  const oos = transitions.filter((t) => t.to === "oos");
+  const low = transitions.filter((t) => t.to === "low");
+  const stmts = transitions.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
+    .bind(now, "error", `${t.to === "oos" ? "⛔ OUT OF STOCK" : "⚠️ Low stock"}: ${t.name || t.sku || t.product_id} (${t.after} bache)`));
+  await env.DB.batch(stmts);
+  const title = oos.length
+    ? `⛔ ${oos.length > 1 ? oos.length + " products" : (oos[0].name || oos[0].sku)} OUT OF STOCK`
+    : `⚠️ Low stock: ${low.length > 1 ? low.length + " products" : (low[0].name || low[0].sku)}`;
+  const body = transitions.slice(0, 6).map((t) => `${t.to === "oos" ? "⛔" : "⚠️"} ${t.name || t.sku}: ${t.after} units bache`).join("\n");
+  await pushNotify(env, "alert", title, body);
+  await sendMail(env, `[Anagh Stock] ${title}`, emailHtml({ kind: "error", code: "STOCK", message: body, env, now }), "alert");
+  await setSetting(env, "stock_alert", JSON.stringify({ ts: now, oos: oos.map((t) => t.name || t.sku), low: low.map((t) => t.name || t.sku) }));
+  for (const t of oos) if (t.auto_oos) await markOOSOnPortal(env, t).catch(() => {});
+}
+// Portal par OOS mark (gated: endpoint capture hone tak sirf event; capture ke baad real)
+async function markOOSOnPortal(env, product) {
+  const cfg = JSON.parse((await getSetting(env, "OOS_ENDPOINT")) || "null");
+  if (!cfg || !cfg.path) {
+    await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
+      .bind(Date.now(), "info", `Auto-OOS ready — portal endpoint abhi set nahi. ${product.name || product.sku} ko portal par manually OOS kar dijiye.`).run();
+    return { ok: false, reason: "endpoint-not-set" };
+  }
+  const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  const body = JSON.stringify(cfg.template || {}).replace(/__PID__/g, product.product_id).replace(/__SKU__/g, product.sku || "");
+  const res = await fetch(base + cfg.path, { method: cfg.method || "POST", headers: { ...GW_HEADERS, cookie }, body }).catch(() => null);
+  const ok = !!(res && res.ok);
+  await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
+    .bind(Date.now(), ok ? "info" : "error", `${ok ? "✅ Portal par OOS mark hua" : "❌ Portal OOS fail hua"}: ${product.name || product.sku}`).run();
+  return { ok };
+}
+// Stock page ke liye low+oos count
+async function inventoryList(env) {
+  await ensureInventory(env);
+  const rows = (await env.DB.prepare("SELECT * FROM inventory ORDER BY CASE status WHEN 'oos' THEN 0 WHEN 'low' THEN 1 ELSE 2 END, tracking DESC, name").all()).results;
+  const alerts = rows.filter((r) => r.tracking && (r.status === "oos" || r.status === "low")).length;
+  return { rows, alerts };
 }
 
 const MON = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
@@ -592,6 +782,9 @@ async function directNewOrderPoll(env) {
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
 
+  // Inventory: fast-lane se mile naye orders par bhi stock ghatao (ledger se double nahi hoga)
+  await applyInventoryForNewOrders(env, items.map((o) => o.id)).catch(() => {});
+
   // Notification + mail (new order = dono, aapke rule ke hisaab se)
   const title = items.length === 1
     ? `🆕 New order #${items[0].id} · ${inr(items[0].amount)}`
@@ -666,27 +859,73 @@ async function loginVerify(env, email, code) {
 
 // AI assistant — humare apne data se jawab (free, reliable)
 async function askBot(env, q) {
-  const text = String(q || "").toLowerCase();
+  const raw = String(q || "").trim();
+  const text = raw.toLowerCase().replace(/[?.!,]/g, " ").replace(/\s+/g, " ");
+  if (!text) return "Poochhiye — jaise \"kya low stock hai\", \"kaunse order NDR hue\", \"aaj kitni sale\", \"top product kaunsa\".";
   const d = await loadDashboard(env);
   const counts = d.latest?.counts || {};
   const metrics = d.latest?.metrics || {};
   const orders = d.orders || [];
   const ins = d.insights?.items || [];
+  const inv = (d.inventory?.rows || []);
+  const rupee = (v) => (v != null ? "₹" + Number(v).toLocaleString("en-IN") : "–");
   const byStatus = (re) => orders.filter((o) => re.test((o.status || "").toLowerCase()));
-  const listOrders = (arr) => arr.slice(0, 12).map((o) => `#${o.id}${o.customer ? " · " + o.customer : ""}${o.amount != null ? " · ₹" + o.amount : ""}`).join("\n") || "—";
+  const listOrders = (arr) => arr.slice(0, 12).map((o) => `#${o.id}${o.customer ? " · " + o.customer : ""}${o.amount != null ? " · " + rupee(o.amount) : ""}`).join("\n") || "—";
+  const has = (...w) => w.some((x) => text.includes(x));
+
+  // --- STOCK / inventory (apne app ka stock) ---
+  if (has("low stock", "kam stock", "khatam hone", "kam hai", "restock", "reorder")) {
+    const low = inv.filter((r) => r.tracking && (r.status === "low" || r.status === "oos"));
+    return low.length ? `⚠️ Dhyaan dene wale (${low.length}):\n` + low.map((r) => `${r.status === "oos" ? "⛔" : "⚠️"} ${r.name || r.sku}: ${r.units} units bache`).join("\n")
+      : "✅ Koi tracked product low ya out of stock nahi.";
+  }
+  if (has("out of stock", "oos", "stock khatam", "khatam ho") || (has("stock") && has("kya", "konsa", "kaunsa", "which"))) {
+    const o = inv.filter((r) => r.tracking && r.status === "oos");
+    const insOos = ins.filter((p) => p.oos);
+    let out = o.length ? `⛔ App me OOS:\n` + o.map((r) => `• ${r.name || r.sku}`).join("\n") : "";
+    if (insOos.length) out += (out ? "\n\n" : "") + `Portal insights me OOS:\n` + insOos.map((p) => `• ${p.name}`).join("\n");
+    return out || "✅ Kuch bhi out of stock nahi.";
+  }
+  if (has("stock") || has("inventory", "kitni unit", "kitne unit", "kitna bacha")) {
+    const tracked = inv.filter((r) => r.tracking);
+    if (tracked.length) return `📦 Aapka stock:\n` + tracked.slice(0, 15).map((r) => `${r.status === "oos" ? "⛔" : r.status === "low" ? "⚠️" : "✅"} ${r.name || r.sku}: ${r.units}`).join("\n");
+    return "Abhi kisi product ka stock track nahi ho raha. Stock page par units set kijiye, phir order aane par automatic ghatega.";
+  }
+
+  // --- Orders by status ---
   if (/\bndr\b/.test(text)) { const a = byStatus(/ndr/); return `🔴 NDR orders: ${a.length}\n${listOrders(a)}`; }
   if (/\brto\b/.test(text)) { const a = byStatus(/rto/); return `🔴 RTO orders: ${a.length}\n${listOrders(a)}`; }
-  if (/cancel/.test(text)) { const a = byStatus(/cancel/); return `⚪ Cancelled: ${a.length}\n${listOrders(a)}`; }
-  if (/transit|raaste|way/.test(text)) { const a = byStatus(/transit/); return `🚚 In Transit: ${a.length}\n${listOrders(a)}`; }
-  if (/deliver/.test(text)) { const a = byStatus(/deliver/); return `✅ Delivered orders (list mein): ${a.length}\n${listOrders(a)}`; }
-  if (/(top|best|sabse).*(bik|sell|product)|kaunsa.*product|product.*performance/.test(text) && ins.length) {
-    return `📊 Top products (units, 30 din):\n` + ins.slice(0, 6).map((p) => `${p.rank}. ${p.name} — ${p.units} units, ${p.orders} orders${p.oos ? " (OUT OF STOCK)" : ""}`).join("\n");
+  if (has("cancel")) { const a = byStatus(/cancel/); return `⚪ Cancelled: ${a.length}\n${listOrders(a)}`; }
+  if (has("transit", "raaste", "shipment", "nikla")) { const a = byStatus(/transit|shipment/); return `🚚 In Transit: ${a.length}\n${listOrders(a)}`; }
+  if (has("deliver", "pahunch")) { const a = byStatus(/deliver/); return `✅ Delivered (list me): ${a.length}\n${listOrders(a)}`; }
+  if (has("confirm", "naya order", "naye order", "new order")) { const a = byStatus(/confirm/); return `🆕 Confirmed/naye: ${a.length}\n${listOrders(a)}`; }
+
+  // --- Products / sales ---
+  if (has("top", "best", "sabse") && has("product", "bik", "sell", "chal")) {
+    return ins.length ? `📊 Top products (units, 30 din):\n` + ins.slice(0, 6).map((p) => `${p.rank}. ${p.name} — ${p.units} units, ${p.orders} orders${p.oos ? " ⛔OOS" : ""}`).join("\n")
+      : "Insights abhi load nahi hua.";
   }
-  if (/stock|khatam/.test(text)) { const o = ins.filter((p) => p.oos); return o.length ? `⚠️ Out of stock:\n` + o.map((p) => `• ${p.name}`).join("\n") : "✅ Koi product out of stock nahi."; }
-  if (/aaj|today/.test(text)) return `Aaj: Sales ${metrics["Today's Sales"] != null ? "₹" + Number(metrics["Today's Sales"]).toLocaleString("en-IN") : "–"}, Orders ${metrics["Today's orders"] ?? "–"}`;
-  if (/sale|revenue|kamai|bikri|total/.test(text)) return Object.entries(metrics).map(([k, v]) => `${k}: ${typeof v === "number" && /sale|value/i.test(k) ? "₹" + Number(v).toLocaleString("en-IN") : v}`).join("\n") || "Abhi data load nahi hua.";
-  if (/kitne|order|status/.test(text)) return Object.entries(counts).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}: ${n}`).join("\n") || "Abhi data nahi.";
-  return "Main aapke data se ye bata sakta hoon:\n• NDR / RTO / Cancelled / In Transit / Delivered orders\n• Aaj ki sale, total sale\n• Top products, out of stock\n\nPoochhiye jaise: \"kaunse order NDR hue\", \"top product kaunsa\", \"aaj kitni sale\", \"kya out of stock hai\".";
+  if (has("aaj", "today")) return `Aaj: Sales ${rupee(metrics["Today's Sales"])}, Orders ${metrics["Today's orders"] ?? "–"}`;
+  if (has("kal", "yesterday")) return `Kal: Sales ${rupee(metrics["Yesterday's Sales"])}, Orders ${metrics["Yesterday's orders"] ?? "–"}`;
+  if (has("sale", "revenue", "kamai", "bikri", "total", "mahine", "month")) return Object.entries(metrics).map(([k, v]) => `${k}: ${typeof v === "number" && /sale|value/i.test(k) ? rupee(v) : v}`).join("\n") || "Abhi data load nahi hua.";
+  if (has("kitne order", "order kitne", "status", "summary", "kitne")) return Object.entries(counts).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}: ${n}`).join("\n") || "Abhi data nahi.";
+
+  // --- Specific product name lookup (bot ki galti kam karne ke liye) ---
+  const words = text.split(" ").filter((w) => w.length > 3 && !["order","stock","kitna","kitne","konsa","kaunsa","product","hai","mera","hua","wala"].includes(w));
+  if (words.length) {
+    const hit = inv.find((r) => words.some((w) => (r.name || "").toLowerCase().includes(w))) ||
+                ins.find((p) => words.some((w) => (p.name || "").toLowerCase().includes(w)));
+    if (hit) {
+      const name = hit.name || hit.sku;
+      const stock = inv.find((r) => (r.name || "") === hit.name);
+      const sale = ins.find((p) => (p.name || "") === hit.name);
+      const bits = [`📦 ${name}`];
+      if (stock && stock.tracking) bits.push(`Stock: ${stock.units} units (${stock.status})`);
+      if (sale) bits.push(`30 din: ${sale.units} units, ${sale.orders} orders${sale.oos ? " ⛔OOS" : ""}`);
+      return bits.join("\n");
+    }
+  }
+  return "Main aapke live data se bata sakta hoon:\n• Stock — kya low/out of stock hai, kisi product ka stock\n• Orders — NDR / RTO / Cancelled / In Transit / Delivered / naye\n• Sale — aaj, kal, mahine ki\n• Top products\n\nJaise: \"kya low stock hai\", \"Meat Masala ka stock\", \"kaunse NDR hue\", \"aaj kitni sale\".";
 }
 
 async function gwPost(env, path, body) {
@@ -782,6 +1021,7 @@ async function cronTick(env) {
   }
   await fetchInsights(env).catch(() => {});
   await fetchRatings(env).catch(() => {});
+  await checkScheduledOOS(env).catch(() => {});
   await dispatch(env);
 }
 

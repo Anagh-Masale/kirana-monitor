@@ -141,6 +141,22 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .ibv{text-align:right;font-weight:800;font-size:13.5px;font-variant-numeric:tabular-nums}
 .oosdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--bad);vertical-align:middle;margin-left:3px}
 @media(max-width:600px){.ibar{grid-template-columns:42% 1fr 34px;gap:8px}.ibl{font-size:12px}}
+.mbadge{margin-left:auto;background:var(--bad);color:#fff;font-size:11px;font-weight:800;min-width:20px;height:20px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+.sbadge{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;vertical-align:middle}
+.sbadge.oos{background:var(--bad-bg);color:var(--bad)}.sbadge.low{background:var(--warn-bg);color:var(--warn)}.sbadge.ok{background:var(--good-bg);color:var(--good)}.sbadge.untr{background:var(--mute-bg);color:var(--mute)}
+.srow{border:1px solid var(--line);border-radius:14px;padding:13px 14px;margin-bottom:11px;background:#fff}
+.srow.oos{border-color:#E5C0B9;background:#FDF4F2}.srow.low{border-color:#EAD6AE;background:#FDF8EE}
+.sname{font-size:14.5px;margin-bottom:11px}
+.sctrl{display:flex;gap:10px;flex-wrap:wrap}
+.sctrl label{display:flex;flex-direction:column;font-size:11px;color:var(--muted);font-weight:700;gap:3px}
+.sctrl input{width:96px;font:inherit;font-size:14px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff}
+.srow2{display:flex;gap:10px 12px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.chk{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:600;cursor:pointer}
+.btn.mini{padding:7px 13px;font-size:13px}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.sched{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);font-weight:700}
+.sched input{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+@media(max-width:600px){.sctrl input{width:30vw;max-width:110px}}
 .up{color:var(--good)}.down{color:var(--bad)}
 .rsum{display:flex;align-items:center;gap:16px;margin-bottom:8px}.rsum .big{font-size:40px;font-weight:800;line-height:1}
 .stars{color:#E0A100;font-size:18px;letter-spacing:2px}
@@ -192,6 +208,8 @@ const TR = {
   insSub: { hi: "Pichhle 30 din · kaunsa product kitna bika", en: "Last 30 days · product performance" },
   units: { hi: "units", en: "units" }, ordLabel: { hi: "orders", en: "orders" }, oos: { hi: "Out of stock", en: "Out of stock" },
   topByUnits: { hi: "Top products — units bike", en: "Top products — units sold" }, allProducts: { hi: "Saare products", en: "All products" },
+  stock: { hi: "Stock", en: "Stock" },
+  stockSub: { hi: "Stock yahin manage hota hai. Order aate hi units apne aap ghatti hain. 0 hote hi alert, aur armed hone par portal OOS.", en: "Manage stock here. Units auto-decrease as orders arrive. At 0 it alerts, and if armed, marks OOS on the portal." },
   noIns: { hi: "Sales insights abhi load nahi hua — agle 30-min check mein aa jayega.", en: "Sales insights not loaded yet — coming next 30-min check." },
   avgRating: { hi: "Average rating", en: "Average rating" }, reviewsL: { hi: "reviews", en: "reviews" }, ratingsL: { hi: "ratings", en: "ratings" },
   noRatings: { hi: "Abhi tak koi rating nahi aayi. Jaise hi customer rating denge, yahan dikhega.", en: "No ratings yet. They'll show here once customers rate." },
@@ -299,6 +317,16 @@ function toggleChat(){var p=document.getElementById("chatpanel"),f=document.getE
  if(open)setTimeout(function(){var i=document.getElementById("chatin");if(i)i.focus();},120);}
 try{setTimeout(function(){var t=document.getElementById("fabtip"),p=document.getElementById("chatpanel");
  if(t&&p&&!p.classList.contains("show")){t.classList.add("show");setTimeout(function(){t.classList.remove("show");},5500);}},1400);}catch(_){}
+function sRow(b){return b.closest(".srow");}
+async function saveStock(btn){var r=sRow(btn),o=btn.textContent;btn.textContent="…";
+ var body={product_id:r.dataset.pid,units:+r.querySelector(".in-units").value,threshold:+r.querySelector(".in-thr").value,min_qty:+r.querySelector(".in-min").value,tracking:r.querySelector(".in-track").checked,auto_oos:r.querySelector(".in-auto").checked};
+ try{await fetch("/api/stock/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});toast("✅ Stock save ho gaya","",false);setTimeout(function(){location.reload();},650);}catch(e){btn.textContent=o;}}
+async function markOOSNow(btn){var r=sRow(btn);if(!confirm("Is product ko ABHI out of stock mark karein?"))return;
+ await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:"now"})});toast("⛔ Out of stock mark","",false);setTimeout(function(){location.reload();},650);}
+async function scheduleOOS(btn){var r=sRow(btn),v=r.querySelector(".in-when").value;if(!v){alert("Pehle date aur time chuniye");return;}
+ await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:new Date(v).getTime()})});toast("⏰ OOS schedule set","",false);}
+async function discoverStock(btn){var o=btn.textContent;btn.textContent="Laa raha hoon…";
+ try{var j=await (await fetch("/api/stock/discover",{method:"POST"})).json();toast("✅ "+(j.found||0)+" naye product mile","",false);setTimeout(function(){location.reload();},800);}catch(e){btn.textContent=o;}}
 async function openOrder(id){
   const sh=document.getElementById("sheet");
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:30px 0;text-align:center;color:#7B7168">Loading #'+esc(id)+'…</div>';
@@ -422,6 +450,31 @@ function insightsView(d, t) {
   return `<div class="ihead">${t("topByUnits")}</div>${bars}<div class="idiv"></div><div class="ihead">${t("allProducts")}</div>${list}`;
 }
 
+function stockView(d, t) {
+  const rows = (d.inventory && d.inventory.rows) || [];
+  if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke recent orders se product list ban jayegi, phir har product ki units set kar dijiye.</div>
+    <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Recent orders se products laao</button>`;
+  const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;
+  const list = rows.map((r) => `<div class="srow ${r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}">
+    <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}</div>
+    <div class="sctrl">
+      <label>Units bache<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
+      <label>Alert &lt;=<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label>
+      <label>Min order qty<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric"></label>
+    </div>
+    <div class="srow2">
+      <label class="chk"><input type="checkbox" class="in-track" ${r.tracking ? "checked" : ""}> Track</label>
+      <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-OOS</label>
+      <button class="btn mini" onclick="saveStock(this)">Save</button>
+      <button class="btn mini ghost" onclick="markOOSNow(this)">Mark OOS</button>
+      <label class="sched">Schedule OOS<input type="datetime-local" class="in-when"></label>
+      <button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button>
+    </div>
+  </div>`).join("");
+  return `<div class="sub" style="margin-bottom:14px">${t("stockSub")}</div>${list}
+    <button class="btn ghost" style="margin-top:6px" onclick="discoverStock(this)">↺ Recent orders se aur products laao</button>`;
+}
+
 function stars(n) {
   n = Math.round(Number(n) || 0);
   return `<span class="stars">${"★".repeat(n)}${"☆".repeat(5 - n)}</span>`;
@@ -500,6 +553,8 @@ export function dashboardPage(d, env, lang) {
     : `<div class="empty">${t("noOrders")}</div>`;
 
   const menuA = (sec, ic, label, on) => `<a data-sec="${sec}" class="${on ? "on" : ""}" onclick="showSec('${sec}')"><span class="ic">${ic}</span>${label}</a>`;
+  const invAlerts = (d.inventory && d.inventory.alerts) || 0;
+  const stockMenu = `<a data-sec="stock" onclick="showSec('stock')"><span class="ic">🏷️</span>${t("stock")}${invAlerts ? `<span class="mbadge">${invAlerts}</span>` : ""}</a>`;
 
   const body = `<div class="topbar">
     <button class="burger" onclick="toggleMenu(1)" aria-label="Menu">☰</button>
@@ -511,11 +566,12 @@ export function dashboardPage(d, env, lang) {
   </div>
   <div class="menu" id="menu"><div class="bg" onclick="toggleMenu(0)"></div><div class="panel">
     <div class="mh"><div class="mark" style="width:30px;height:30px;border-radius:8px;font-size:11px">KC</div><b>${t("menu")}</b></div>
-    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("settings", "⚙️", t("settings"))}
+    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${stockMenu}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("settings", "⚙️", t("settings"))}
   </div></div>
   <div class="wrap">
   ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 min mein naya data aayega.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
   ${failBanner}
+  ${invAlerts ? `<div class="banner bad" onclick="showSec('stock')" style="cursor:pointer"><b>⚠️ ${invAlerts} product dhyaan maangte hain</b> — low ya out of stock. Tap karke Stock kholiye.</div>` : ""}
   ${!d.lastRun ? `<div class="banner demo"><b>Pehla setup — Gmail se login kariye:</b><div style="margin-top:10px">${loginForm()}</div></div>` : ""}
 
   <div class="sec on" id="sec-home">
@@ -538,6 +594,11 @@ export function dashboardPage(d, env, lang) {
       <form method="post" action="/run" style="margin:0"><button>${t("checkNow")}</button></form>
     </div>
     <div class="card">${ordersTable}</div>
+  </div>
+
+  <div class="sec" id="sec-stock">
+    <h2 style="margin:0 0 14px">🏷️ ${t("stock")}</h2>
+    ${stockView(d, t)}
   </div>
 
   <div class="sec" id="sec-insights">
