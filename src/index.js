@@ -396,6 +396,7 @@ async function directNewOrderPoll(env) {
   const now = Date.now();
   const cookie = cookieHeaderFromState(await getSetting(env, "KC_STATE"));
   if (!cookie) return { ok: false, reason: "no-cookie" };
+  const cookieNames = cookie.split(";").map((c) => c.split("=")[0].trim()).filter(Boolean);
   const base = env.GW_BASE || "https://gateway.kirana.club";
   let res, text;
   try {
@@ -423,8 +424,9 @@ async function directNewOrderPoll(env) {
   try { j = JSON.parse(text); } catch (_) {}
   if (res.status !== 200 || !j || j.status !== "OK" || !j.data) {
     // Server se block / login expire — chup-chaap, browser lane cover karega
-    await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: false, status: res.status }));
-    return { ok: false, reason: "bad-response", status: res.status };
+    const snippet = String(text || "").replace(/eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g, "<jwt>").slice(0, 250);
+    await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: false, status: res.status, body: snippet }));
+    return { ok: false, reason: "bad-response", status: res.status, body: snippet, cookieCount: cookieNames.length, cookieNames: cookieNames.slice(0, 25) };
   }
   await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: true }));
   const orders = j.data.data || [];
