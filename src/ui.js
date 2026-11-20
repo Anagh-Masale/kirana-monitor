@@ -74,6 +74,26 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 background:#1E1914;color:#fff;border-radius:14px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25);width:min(92vw,420px)}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible;pointer-events:auto}.toast b{display:block;font-size:15px;margin-bottom:3px}.toast span{font-size:13.5px;opacity:.85;white-space:pre-line}
 .toast.order{background:#1E7F55}
+.fab{position:fixed;right:18px;bottom:18px;z-index:58;width:58px;height:58px;border-radius:50%;background:var(--accent);color:#fff;font-size:27px;line-height:1;border:0;cursor:pointer;box-shadow:0 10px 26px rgba(196,98,58,.5);display:flex;align-items:center;justify-content:center;transition:transform .15s ease}
+.fab:hover{transform:scale(1.06)}.fab:active{transform:scale(.94)}
+.fab.open{background:#1E1914;box-shadow:0 10px 26px rgba(0,0,0,.35)}
+.fabtip{position:fixed;right:84px;bottom:30px;z-index:57;background:#1E1914;color:#fff;font-size:12.5px;line-height:1.45;padding:10px 13px;border-radius:13px 13px 2px 13px;max-width:230px;box-shadow:0 8px 24px rgba(0,0,0,.28);opacity:0;transform:translateX(8px) scale(.96);transform-origin:bottom right;transition:opacity .25s ease,transform .25s ease;pointer-events:none}
+.fabtip.show{opacity:1;transform:none}
+.fab:hover ~ .fabtip{opacity:1;transform:none}
+.chatpanel{position:fixed;right:18px;bottom:86px;z-index:58;width:min(374px,calc(100vw - 32px));height:min(68vh,540px);background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 20px 56px rgba(0,0,0,.28);display:none;flex-direction:column;overflow:hidden}
+.chatpanel.show{display:flex;animation:popin .22s ease}
+@keyframes popin{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+.chathead{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line);font-weight:800;font-size:15px}
+.chathead button{background:none;border:0;font-size:24px;line-height:1;color:var(--muted);cursor:pointer;padding:0 2px}
+#chatlog{flex:1;overflow:auto;display:flex;flex-direction:column;gap:9px;padding:14px}
+#chatlog .msg{max-width:84%;padding:9px 12px;border-radius:13px;font-size:13.5px;line-height:1.5;white-space:pre-line}
+#chatlog .msg.bot{background:#F1ECE3;color:var(--ink);align-self:flex-start;border-bottom-left-radius:3px}
+#chatlog .msg.me{background:var(--accent);color:#fff;align-self:flex-end;border-bottom-right-radius:3px}
+.chatinput{display:flex;gap:8px;border-top:1px solid var(--line);padding:10px}
+.chatinput input{flex:1;font:inherit;padding:10px 12px;border-radius:11px;border:1px solid var(--line);outline:none}
+.chatinput input:focus{border-color:var(--accent)}
+.chatinput button{border:0;background:var(--accent);color:#fff;font-weight:700;padding:0 15px;border-radius:11px;cursor:pointer}
+@media(max-width:600px){.chatpanel{width:calc(100vw - 20px);right:10px;height:70vh}.fabtip{max-width:190px}}
 .pushbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
 .pushbar .sub{flex:1;min-width:200px}
 details.card summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:baseline;font-weight:700;font-size:15px}
@@ -256,6 +276,14 @@ function addChat(who,txt){var log=document.getElementById("chatlog");if(!log)ret
 async function ask(){var i=document.getElementById("chatin");var q=(i.value||"").trim();if(!q)return;i.value="";addChat("me",q);var ph=addChat("bot","…");
  try{var r=await (await fetch("/api/ask",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({q:q})})).json();if(ph)ph.textContent=r.answer||"—";}
  catch(e){if(ph)ph.textContent="Jawab nahi mila.";}var log=document.getElementById("chatlog");if(log)log.scrollTop=log.scrollHeight;}
+var kcChatSeeded=false;
+function toggleChat(){var p=document.getElementById("chatpanel"),f=document.getElementById("fab"),tip=document.getElementById("fabtip");
+ var open=!p.classList.contains("show");p.classList.toggle("show",open);f.classList.toggle("open",open);f.textContent=open?"×":"🤖";
+ if(tip)tip.classList.remove("show");
+ if(open&&!kcChatSeeded){kcChatSeeded=true;addChat("bot","Namaste! 🤖 Main aapke orders ke baare mein turant bata sakta hoon:\\n\\n• Kaunse order NDR / RTO / Cancelled / In Transit / Delivered hain\\n• Aaj ki ya total sale kitni hui\\n• Top chalne wala product kaunsa hai\\n• Kya out of stock hai\\n\\nBas type karke poochhiye, jaise: \\"kaunse order NDR hue\\" ya \\"aaj ki sale\\".");}
+ if(open)setTimeout(function(){var i=document.getElementById("chatin");if(i)i.focus();},120);}
+try{setTimeout(function(){var t=document.getElementById("fabtip"),p=document.getElementById("chatpanel");
+ if(t&&p&&!p.classList.contains("show")){t.classList.add("show");setTimeout(function(){t.classList.remove("show");},5500);}},1400);}catch(_){}
 async function openOrder(id){
   const sh=document.getElementById("sheet");
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:30px 0;text-align:center;color:#7B7168">Loading #'+esc(id)+'…</div>';
@@ -454,7 +482,7 @@ export function dashboardPage(d, env, lang) {
   </div>
   <div class="menu" id="menu"><div class="bg" onclick="toggleMenu(0)"></div><div class="panel">
     <div class="mh"><div class="mark" style="width:30px;height:30px;border-radius:8px;font-size:11px">KC</div><b>${t("menu")}</b></div>
-    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("assistant", "💬", "Assistant")}${menuA("settings", "⚙️", t("settings"))}
+    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("settings", "⚙️", t("settings"))}
   </div></div>
   <div class="wrap">
   ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 min mein naya data aayega.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
@@ -493,8 +521,6 @@ export function dashboardPage(d, env, lang) {
     <div class="card">${ratingsView(d, t)}</div>
   </div>
 
-  <div class="sec" id="sec-assistant">${chatSection(t)}</div>
-
   <div class="sec" id="sec-settings">
     <h2 style="margin:0 0 14px">${t("settings")}</h2>
     <div class="card pushbar" style="margin-bottom:14px">
@@ -512,6 +538,13 @@ export function dashboardPage(d, env, lang) {
   </div>
 
   </div>
+<div class="fabtip" id="fabtip">🤖 ${lang === "hi" ? "Poochhiye: kaunse order NDR/RTO hue, aaj ki sale, top product, kya out of stock hai" : "Ask: which orders are NDR/RTO, today's sale, top product, what's out of stock"}</div>
+<button class="fab" id="fab" onclick="toggleChat()" aria-label="Assistant">🤖</button>
+<div class="chatpanel" id="chatpanel">
+  <div class="chathead"><span>🤖 ${lang === "hi" ? "AI Assistant" : "AI Assistant"}</span><button type="button" onclick="toggleChat()" aria-label="Close">×</button></div>
+  <div id="chatlog"></div>
+  <div class="chatinput"><input id="chatin" autocomplete="off" placeholder="${lang === "hi" ? "Poochhiye…" : "Ask…"}" onkeydown="if(event.key==='Enter')ask()"><button type="button" onclick="ask()">${lang === "hi" ? "Bhejo" : "Send"}</button></div>
+</div>
 <div class="toast" id="toast"><b id="tT"></b><span id="tB"></span></div>
 <div class="ovl" id="ovl" onclick="if(event.target===this)closeOrder()"><div class="sheet" style="position:relative" id="sheet"></div></div>
 <script>window.KC={lastEvent:${Number(d.lastEvent?.id || 0)},lastRun:${Number(d.lastRun?.ts || 0)},devices:${Number(d.pushDevices || 0)}};</script>
