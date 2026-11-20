@@ -443,7 +443,15 @@ async function fetchOrderExtra(env, id) {
   const j = await res.json().catch(() => null);
   const d = j && (Array.isArray(j.data) ? j.data[0] : j.data);
   if (!d) return null;
-  return { items: d.total_items, amountStr: d.total_amount_string, invoice: d.delivery_invoice, label: d.printing_label, tracking: d.tracking_link, note: d.note };
+  const pp = d.order_details && d.order_details.bill_breakup && d.order_details.bill_breakup.products_pricing;
+  const products = Array.isArray(pp)
+    ? pp.filter((p) => p && (p.product_name || p.key)).map((p) => ({
+        name: p.key || p.product_name || "",
+        qty: p.quantity ?? p.pack_size ?? null,
+        price: num(p.total_value) ?? num(p.offered_value) ?? num(p.value),
+      }))
+    : [];
+  return { items: d.total_items, amountStr: d.total_amount_string, invoice: d.delivery_invoice, label: d.printing_label, tracking: d.tracking_link, note: d.note, products };
 }
 
 function niceStatus(s) {

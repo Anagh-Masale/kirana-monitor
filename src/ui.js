@@ -187,10 +187,16 @@ async function openOrder(id){
   if(ex.invoice)links+='<a class="lnk" href="'+esc(ex.invoice)+'" target="_blank">Invoice</a>';
   if(ex.label)links+='<a class="lnk" href="'+esc(ex.label)+'" target="_blank">Label</a>';
   if(ex.tracking)links+='<a class="lnk" href="'+esc(ex.tracking)+'" target="_blank">Track</a>';
+  let prods="";
+  if(ex.products&&ex.products.length){
+    prods='<div style="font-size:12px;font-weight:700;color:#7B7168;margin:14px 0 2px;text-transform:uppercase;letter-spacing:.5px">Products ('+ex.products.length+')</div>'
+      +ex.products.map(p=>'<div class="drow"><span class="k" style="color:#1E1914;max-width:72%">'+esc(p.name)+'</span><span class="v">'+(p.price!=null?rupee(p.price):"")+'</span></div>').join("");
+  }
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button>'
     +'<h3>#'+esc(o.id)+'</h3><div class="sub" style="margin-bottom:12px">'+esc(d.customer||o.customer||"")+'</div>'
     +row("Status",o.status)+row("Amount",rupee(o.amount))+(d.paid?row("Paid",rupee(d.paid)):"")
-    +row("Payment",o.payment)+row("Items",ex.items)+row("Courier",d.courier)+row("Order date",fmtISO(d.date))
+    +row("Payment",o.payment)+(ex.products&&ex.products.length?"":row("Items",ex.items))+row("Courier",d.courier)+row("Order date",fmtISO(d.date))
+    +prods
     +(d.note?row("Note",d.note):"")
     +(addr?'<div style="font-size:12px;font-weight:700;color:#7B7168;margin:14px 0 2px;text-transform:uppercase;letter-spacing:.5px">Delivery address</div><div class="addr">'+addr+'</div>':'')
     +(links?'<div style="margin-top:6px">'+links+'</div>':'');
