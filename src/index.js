@@ -443,13 +443,18 @@ async function fetchOrderExtra(env, id) {
   const j = await res.json().catch(() => null);
   const d = j && (Array.isArray(j.data) ? j.data[0] : j.data);
   if (!d) return null;
-  const pp = d.order_details && d.order_details.bill_breakup && d.order_details.bill_breakup.products_pricing;
+  const od = d.order_details || {};
+  const cart = Array.isArray(od.cart) ? od.cart : [];
+  const nameById = {};
+  for (const c of cart) if (c && c.product_id != null) nameById[String(c.product_id)] = c.name; // English naam
+  const pp = od.bill_breakup && od.bill_breakup.products_pricing;
   const products = Array.isArray(pp)
-    ? pp.filter((p) => p && (p.product_name || p.key)).map((p) => ({
-        name: p.key || p.product_name || "",
-        qty: p.quantity ?? p.pack_size ?? null,
-        price: num(p.total_value) ?? num(p.offered_value) ?? num(p.value),
-      }))
+    ? pp.filter((p) => p && (p.product_name || p.key)).map((p) => {
+        const qty = p.quantity ?? p.pack_size ?? null;
+        const en = nameById[String(p.id)];
+        const name = en ? `${en}${qty ? " × " + qty : ""}` : p.key || p.product_name || "";
+        return { name, qty, price: num(p.total_value) ?? num(p.offered_value) ?? num(p.value) };
+      })
     : [];
   return { items: d.total_items, amountStr: d.total_amount_string, invoice: d.delivery_invoice, label: d.printing_label, tracking: d.tracking_link, note: d.note, products };
 }
