@@ -187,10 +187,24 @@ async function processSnapshot(env, snap, source) {
     .map((o) => ({ ...o, id: String(o.id), status: String(o.status || "Unknown") }));
   const statusCounts = snap.statusCounts || (orders.length ? countBy(orders, "status") : {});
 
-  const prev = await env.DB.prepare("SELECT metrics,status_counts FROM runs WHERE ok=1 ORDER BY ts DESC LIMIT 1").first();
+  const prev = await env.DB.prepare("SELECT metrics,status_counts,order_count FROM runs WHERE ok=1 ORDER BY ts DESC LIMIT 1").first();
   const firstRun = !prev;
   const prevMetrics = prev ? JSON.parse(prev.metrics || "{}") : {};
   const prevCounts = prev ? JSON.parse(prev.status_counts || "{}") : {};
+  const prevOrderCount = prev ? prev.order_count || 0 : 0;
+
+  // Glitch guard: orders/counts kabhi ek saath 0 par nahi aate agar pehle data tha.
+  // Aisa tabhi hota hai jab page theek se load na ho. Reject: na diff, na notification,
+  // na purana data overwrite. Pichhle good numbers carry-forward, dashboard green rehta hai.
+  const allNow = Number(statusCounts["All"] || 0);
+  const collapsed = orders.length === 0 && allNow === 0;
+  const hadData = prevOrderCount > 0 || Number(prevCounts["All"] || 0) > 0;
+  if (!firstRun && collapsed && hadData) {
+    await env.DB.prepare(
+      "INSERT INTO runs(ts,source,ok,metrics,status_counts,changes,order_count) VALUES(?,?,1,?,?,?,?)"
+    ).bind(now, source, JSON.stringify(prevMetrics), JSON.stringify(prevCounts), "[]", prevOrderCount).run();
+    return { ok: true, skipped: true, reason: "partial-load glitch, carried forward" };
+  }
   const existing = new Map(
     (await env.DB.prepare("SELECT id,status,history FROM orders").all()).results.map((r) => [r.id, r])
   );
