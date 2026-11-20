@@ -326,7 +326,10 @@ async function markOOSNow(btn){var r=sRow(btn);if(!confirm("Is product ko ABHI o
 async function scheduleOOS(btn){var r=sRow(btn),v=r.querySelector(".in-when").value;if(!v){alert("Pehle date aur time chuniye");return;}
  await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:new Date(v).getTime()})});toast("⏰ OOS schedule set","",false);}
 async function discoverStock(btn){var o=btn.textContent;btn.textContent="Laa raha hoon…";
- try{var j=await (await fetch("/api/stock/discover",{method:"POST"})).json();toast("✅ "+(j.found||0)+" naye product mile","",false);setTimeout(function(){location.reload();},800);}catch(e){btn.textContent=o;}}
+ try{var j=await (await fetch("/api/stock/discover",{method:"POST"})).json();
+  if(j&&j.ok){toast("✅ "+(j.total||j.found||0)+" product mile ("+(j.found||0)+" naye)","",false);setTimeout(function(){location.reload();},900);}
+  else{btn.textContent=o;toast("⚠️ Product nahi mile",(j&&j.reason)||"Portal se data nahi mila.",false);}
+ }catch(e){btn.textContent=o;toast("⚠️ Error","Dubara try kijiye",false);}}
 async function openOrder(id){
   const sh=document.getElementById("sheet");
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:30px 0;text-align:center;color:#7B7168">Loading #'+esc(id)+'…</div>';

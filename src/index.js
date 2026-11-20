@@ -197,17 +197,30 @@ async function route(req, env) {
   }
   if (p === "/api/stock/discover" && post) {
     await ensureInventory(env);
-    const ords = (await env.DB.prepare("SELECT id FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 25").all()).results;
-    let found = 0;
-    for (const o of ords) {
-      const lines = await fetchOrderLines(env, o.id).catch(() => []);
-      for (const ln of lines) {
-        const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
-          .bind(ln.product_id, ln.product_id, ln.name || "", 0, 1, 5, "in_stock", 0, Date.now()).run();
-        if (r.meta && r.meta.changes) found++;
+    const cat = await fetchCatalog(env).catch(() => []);
+    if (!cat.length) {
+      // fallback: recent orders ke items se
+      const ords = (await env.DB.prepare("SELECT id FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 25").all()).results;
+      let f2 = 0;
+      for (const o of ords) {
+        const lines = await fetchOrderLines(env, o.id).catch(() => []);
+        for (const ln of lines) {
+          const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+            .bind(ln.product_id, ln.product_id, ln.name || "", 0, 1, 5, "in_stock", 0, Date.now()).run();
+          if (r.meta && r.meta.changes) f2++;
+        }
       }
+      if (!f2) return Response.json({ ok: false, found: 0, total: 0, reason: "Portal se product list nahi mili — cookie/login shayad expire ho gaya. Settings me dubara Gmail login kijiye, phir try." });
+      return Response.json({ ok: true, found: f2, total: f2 });
     }
-    return Response.json({ ok: true, found });
+    let found = 0, updated = 0;
+    for (const c of cat) {
+      const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+        .bind(c.product_id, c.sku, c.name, 0, 1, 5, "in_stock", 0, Date.now()).run();
+      if (r.meta && r.meta.changes) found++;
+      else { await env.DB.prepare("UPDATE inventory SET sku=CASE WHEN sku='' OR sku IS NULL THEN ? ELSE sku END, name=? WHERE product_id=?").bind(c.sku, c.name, c.product_id).run(); updated++; }
+    }
+    return Response.json({ ok: true, found, updated, total: cat.length });
   }
   if (p === "/api/data") return Response.json(await loadDashboard(env));
   if (p === "/api/latest") {
@@ -570,6 +583,22 @@ async function markOOSOnPortal(env, product) {
     .bind(Date.now(), ok ? "info" : "error", `${ok ? "✅ Portal par OOS mark hua" : "❌ Portal OOS fail hua"}: ${product.name || product.sku}`).run();
   return { ok };
 }
+// Poora catalog ek call me (seed ke liye best) — get_products
+async function fetchCatalog(env) {
+  const wid = Number(env.WAREHOUSE_ID) || 1534;
+  let j = await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true }, warehouse_id: wid } });
+  let prods = j?.data?.products;
+  if (!Array.isArray(prods) || !prods.length) {
+    // warehouse_id ke bina dubara try
+    j = await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true } } });
+    prods = j?.data?.products;
+  }
+  if (!Array.isArray(prods)) return [];
+  return prods.filter((p) => p && p.id != null).map((p) => ({
+    product_id: String(p.id), sku: p.sku_code || "", name: p.name || p.name_label || "", is_oos: !!p.is_oos,
+  }));
+}
+
 // Stock page ke liye low+oos count
 async function inventoryList(env) {
   await ensureInventory(env);
