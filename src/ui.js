@@ -58,6 +58,18 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
 .sub{color:var(--muted);font-size:12.5px}
 .tablewrap{overflow-x:auto;margin:0 -8px}
+.orow{cursor:pointer}.orow:hover{background:#faf7f2}
+.ovl{position:fixed;inset:0;background:rgba(30,25,20,.45);display:none;align-items:flex-end;justify-content:center;z-index:60}
+.ovl.show{display:flex}
+@media(min-width:600px){.ovl{align-items:center}}
+.sheet{background:#fff;width:min(560px,100%);max-height:88vh;overflow:auto;border-radius:18px 18px 0 0;padding:20px}
+@media(min-width:600px){.sheet{border-radius:16px}}
+.sheet h3{margin:0 0 2px;font-size:19px}
+.sheet .x{position:absolute;right:16px;top:14px;font-size:22px;color:var(--muted);cursor:pointer;background:none;border:0}
+.drow{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.drow .k{color:var(--muted)}.drow .v{text-align:right;font-weight:600;max-width:65%}
+.addr{background:var(--bg);border-radius:10px;padding:12px;font-size:14px;line-height:1.5;margin:10px 0}
+.lnk{display:inline-block;margin:4px 8px 0 0;padding:7px 12px;border-radius:9px;background:var(--ink);color:#fff;text-decoration:none;font-size:13px;font-weight:600}
 .toast{position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-140%);transition:transform .35s ease;z-index:50;
 background:#1E1914;color:#fff;border-radius:14px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25);width:min(92vw,420px)}
 .toast.show{transform:translateX(-50%) translateY(0)}.toast b{display:block;font-size:15px;margin-bottom:3px}.toast span{font-size:13.5px;opacity:.85;white-space:pre-line}
@@ -158,6 +170,31 @@ o.connect(v).connect(AC.destination);o.start(t0);o.stop(t0+d+0.05);}
 function chaChing(){if(!AC)return;const t=AC.currentTime;tone(1318.5,t,0.16);tone(1975.5,t+0.09,0.55);tone(2637,t+0.09,0.5,"sine",0.12);
 [0.22,0.29,0.36,0.43].forEach((d,i)=>tone(2800+i*450,t+d,0.14,"sine",0.06));}
 function ding(){if(!AC)return;const t=AC.currentTime;tone(880,t,0.3,"sine",0.2);tone(1320,t+0.13,0.4,"sine",0.15);}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function rupee(n){return n==null?"–":"₹"+Number(n).toLocaleString("en-IN");}
+function closeOrder(){document.getElementById("ovl").classList.remove("show");}
+function fmtISO(s){if(!s)return"";var m=/(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(s);if(!m)return s;var mon=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m[2]-1];var h=+m[4],ap=h<12?"am":"pm";h=h%12||12;return m[3]+" "+mon+", "+h+":"+m[5]+" "+ap;}
+async function openOrder(id){
+  const sh=document.getElementById("sheet");
+  sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:30px 0;text-align:center;color:#7B7168">Loading #'+esc(id)+'…</div>';
+  document.getElementById("ovl").classList.add("show");
+  let o;try{o=await (await fetch('/api/order?id='+encodeURIComponent(id))).json();}catch(e){sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:20px">Detail load nahi hua.</div>';return;}
+  if(!o||o.error){sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button><div style="padding:20px">Is order ka detail abhi nahi hai.</div>';return;}
+  const d=o.detail||{};const ex=o.extra||{};
+  const row=(k,v)=>v?'<div class="drow"><span class="k">'+k+'</span><span class="v">'+esc(v)+'</span></div>':'';
+  const addr=[d.store,d.address,d.area,[d.city,d.state,d.pincode].filter(Boolean).join(", ")].filter(Boolean).map(esc).join("<br>");
+  let links="";
+  if(ex.invoice)links+='<a class="lnk" href="'+esc(ex.invoice)+'" target="_blank">Invoice</a>';
+  if(ex.label)links+='<a class="lnk" href="'+esc(ex.label)+'" target="_blank">Label</a>';
+  if(ex.tracking)links+='<a class="lnk" href="'+esc(ex.tracking)+'" target="_blank">Track</a>';
+  sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button>'
+    +'<h3>#'+esc(o.id)+'</h3><div class="sub" style="margin-bottom:12px">'+esc(d.customer||o.customer||"")+'</div>'
+    +row("Status",o.status)+row("Amount",rupee(o.amount))+(d.paid?row("Paid",rupee(d.paid)):"")
+    +row("Payment",o.payment)+row("Items",ex.items)+row("Courier",d.courier)+row("Order date",fmtISO(d.date))
+    +(d.note?row("Note",d.note):"")
+    +(addr?'<div style="font-size:12px;font-weight:700;color:#7B7168;margin:14px 0 2px;text-transform:uppercase;letter-spacing:.5px">Delivery address</div><div class="addr">'+addr+'</div>':'')
+    +(links?'<div style="margin-top:6px">'+links+'</div>':'');
+}
 let tTimer;function toast(title,body,order){const el=document.getElementById("toast");document.getElementById("tT").textContent=title;
 document.getElementById("tB").textContent=body||"";el.className="toast show"+(order?" order":"");clearTimeout(tTimer);tTimer=setTimeout(()=>el.className="toast",9000);
 order?chaChing():ding();}
@@ -227,7 +264,7 @@ export function dashboardPage(d, env) {
     tl += `<li class="ev"><time>${fmtTime(e.ts)}</time><span class="dot ${esc(e.type)}"></span><span>${esc(e.title)}</span></li>`;
   }
 
-  const rows = d.orders.map((o) => `<tr>
+  const rows = d.orders.map((o) => `<tr class="orow" onclick="openOrder('${esc(o.id)}')" title="Details ke liye tap karein">
       <td><b>#${esc(o.id)}</b><div class="sub">${esc(o.customer || "")}${o.city ? ", " + esc(o.city) : ""}${o.placed_at && !/^\d{4}-/.test(o.placed_at) ? " · " + esc(o.placed_at) : ""}</div></td>
       <td><span class="tag t-${statusTone(o.status)}">${esc(o.status)}</span>${o.payment ? `<div class="sub" style="margin-top:4px">${esc(o.payment)}</div>` : ""}</td>
       <td class="n">${o.amount != null ? "₹" + Number(o.amount).toLocaleString("en-IN") : "–"}</td>
@@ -284,6 +321,7 @@ export function dashboardPage(d, env) {
   </footer>
 </div>
 <div class="toast" id="toast"><b id="tT"></b><span id="tB"></span></div>
+<div class="ovl" id="ovl" onclick="if(event.target===this)closeOrder()"><div class="sheet" style="position:relative" id="sheet"></div></div>
 <script>window.KC={lastEvent:${Number(d.lastEvent?.id || 0)},lastRun:${Number(d.lastRun?.ts || 0)},devices:${Number(d.pushDevices || 0)}};</script>
 <script>${CLIENT_JS}</script>`;
   return page("Kirana Club Tracker", body, false);

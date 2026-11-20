@@ -135,6 +135,21 @@ async function route(req, env) {
   if (p === "/api/notify/latest")
     return Response.json(await env.DB.prepare("SELECT id,ts,kind,title,body FROM notifications ORDER BY id DESC LIMIT 1").first());
   if (p === "/api/fastpoll" && post) return Response.json(await directNewOrderPoll(env));
+  if (p === "/api/order") {
+    const id = url.searchParams.get("id");
+    if (!id) return new Response("no id", { status: 400 });
+    await ensureDetailCol(env);
+    const row = await env.DB.prepare("SELECT id,status,amount,customer,city,payment,placed_at,history,detail FROM orders WHERE id=?").bind(id).first();
+    if (!row) return Response.json({ error: "not-found" });
+    let extra = null;
+    try { extra = await fetchOrderExtra(env, id); } catch (_) {}
+    return Response.json({
+      id: row.id, status: row.status, amount: row.amount, customer: row.customer, city: row.city,
+      payment: row.payment, placed_at: row.placed_at,
+      history: row.history ? JSON.parse(row.history) : [],
+      detail: row.detail ? JSON.parse(row.detail) : null, extra,
+    });
+  }
   if (p === "/api/data") return Response.json(await loadDashboard(env));
   if (p === "/api/latest") {
     const after = Number(url.searchParams.get("after") || 0);
@@ -383,6 +398,54 @@ function cookieHeaderFromState(stateStr) {
   return stateStr.replace(/^cookie:\s*/i, "").trim();
 }
 
+let detailColReady = false;
+async function ensureDetailCol(env) {
+  if (detailColReady) return;
+  try { await env.DB.prepare("ALTER TABLE orders ADD COLUMN detail TEXT").run(); } catch (_) {}
+  detailColReady = true;
+}
+
+function detailOf(o) {
+  const addr = [o.address_line1, o.address_line2].filter(Boolean).join(", ") || o.address_line || "";
+  return {
+    customer: o.address_name || "",
+    store: o.store_name || "",
+    address: addr,
+    area: [o.neighbourhood, o.village, o.landmark].filter(Boolean).join(", "),
+    city: o.address_city || "",
+    state: o.state || "",
+    pincode: o.postal_code || "",
+    district: (o.user && o.user.district) || "",
+    amount: num(o.total),
+    paid: num(o.paid_amount),
+    payment: o.payment_mode === "COD" ? "COD" : o.advance_taken ? "Partially Paid" : o.payment_mode || "",
+    processing: o.processing_status || "",
+    note: o.note || "",
+    courier: o.updated_by || "",
+    date: o.order_date || "",
+  };
+}
+
+async function fetchOrderExtra(env, id) {
+  const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  if (!cookie) return null;
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  const res = await fetch(base + "/dlg/auth/v1/b2b/orders", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json", accept: "application/json, text/plain, */*",
+      origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      cookie,
+    },
+    body: JSON.stringify({ data: { order_id: String(id), warehouse: [] }, request_source: "B2B_EXTERNAL" }),
+  });
+  const j = await res.json().catch(() => null);
+  const d = j && (Array.isArray(j.data) ? j.data[0] : j.data);
+  if (!d) return null;
+  return { items: d.total_items, amountStr: d.total_amount_string, invoice: d.delivery_invoice, label: d.printing_label, tracking: d.tracking_link, note: d.note };
+}
+
 function niceStatus(s) {
   if (!s) return "Unknown";
   const map = {
@@ -457,6 +520,11 @@ async function directNewOrderPoll(env) {
   await setSetting(env, "GW_COOKIE", cookie);
   await setSetting(env, "fast_status", JSON.stringify({ ts: now, ok: true }));
   const orders = j.data.data || [];
+  // Har order ka detail (address etc.) store/update karo — order details ke liye
+  await ensureDetailCol(env);
+  const dStmts = orders.filter((o) => o.order_id != null)
+    .map((o) => env.DB.prepare("UPDATE orders SET detail=? WHERE id=?").bind(JSON.stringify(detailOf(o)), String(o.order_id)));
+  for (let i = 0; i < dStmts.length; i += 50) await env.DB.batch(dStmts.slice(i, i + 50));
   const existing = new Set((await env.DB.prepare("SELECT id FROM orders").all()).results.map((r) => r.id));
   if (existing.size === 0) return { ok: true, seeded: 0 }; // baseline browser lane banayega
   const fresh = orders.filter((o) => o.order_id != null && !existing.has(String(o.order_id)));
@@ -469,15 +537,15 @@ async function directNewOrderPoll(env) {
     const customer = o.address_name || o.store_name || "";
     const city = o.address_city || (o.user && o.user.district) || "";
     const payment = o.payment_mode === "COD" ? "COD" : o.advance_taken ? "Partially Paid" : o.payment_mode || "";
-    return { id, amount, status, customer, city, payment, placedAt: o.order_date || null };
+    return { id, amount, status, customer, city, payment, placedAt: o.order_date || null, detail: JSON.stringify(detailOf(o)) };
   };
   const items = fresh.map(mk);
   const stmts = [];
   for (const o of items) {
     stmts.push(
       env.DB.prepare(
-        "INSERT OR IGNORE INTO orders(id,status,amount,customer,city,placed_at,payment,first_seen,updated_at,history) VALUES(?,?,?,?,?,?,?,?,?,?)"
-      ).bind(o.id, o.status, o.amount, o.customer || null, o.city || null, o.placedAt, o.payment || null, now, now, JSON.stringify([{ s: o.status, t: now }]))
+        "INSERT OR IGNORE INTO orders(id,status,amount,customer,city,placed_at,payment,detail,first_seen,updated_at,history) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+      ).bind(o.id, o.status, o.amount, o.customer || null, o.city || null, o.placedAt, o.payment || null, o.detail, now, now, JSON.stringify([{ s: o.status, t: now }]))
     );
     stmts.push(
       env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "new_order", describe({ type: "new_order", ...o }))
