@@ -146,14 +146,18 @@ async function route(req, env) {
     return Response.json(await loginVerify(env, String(email).trim(), String(code).trim()).catch((e) => ({ ok: false, error: String(e).slice(0, 120) })));
   }
   if (p === "/api/ai-test") {
-    if (!env.AI) return Response.json({ ok: false, reason: "env.AI binding missing — wrangler.toml [ai] binding ya deploy problem" });
-    const model = env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct";
-    try {
-      const r = await env.AI.run(model, { messages: [{ role: "user", content: "Reply with exactly: AI OK" }], max_tokens: 20 });
-      return Response.json({ ok: true, model, response: r?.response ?? r, raw: r });
-    } catch (e) {
-      return Response.json({ ok: false, model, error: String(e && e.message || e) });
+    if (!env.AI) return Response.json({ ok: false, reason: "env.AI binding missing" });
+    const models = [env.AI_MODEL, "@cf/meta/llama-3.1-8b-instruct-fp8", "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/mistralai/mistral-small-3.1-24b-instruct", "@cf/meta/llama-3.2-3b-instruct"].filter(Boolean);
+    const tried = [];
+    for (const model of models) {
+      try {
+        const r = await env.AI.run(model, { messages: [{ role: "user", content: "Reply with exactly: AI OK" }], max_tokens: 20 });
+        const resp = String((r && (r.response || r.result)) || "").trim();
+        if (resp) { await setSetting(env, "ai_model_ok", model); return Response.json({ ok: true, working_model: model, response: resp, tried }); }
+        tried.push({ model, note: "empty response" });
+      } catch (e) { tried.push({ model, error: String(e && e.message || e) }); }
     }
+    return Response.json({ ok: false, tried });
   }
   if (p === "/api/ask" && post) {
     const { q } = await req.json().catch(() => ({}));
@@ -1085,19 +1089,27 @@ Rules:
 - Count/total/average maanga ho to khud ginti/jod ke exact number do (amount ₹ me).
 - "stock" ka matlab STOCK section (app_units/portal), "sale/order" ka matlab ORDERS/METRICS.
 - Product ka naam poora match karo (sirf "masala" se koi bhi product mat pakdo).
-- Koi extra salah/bakwaas nahi, bas jawab.
+- Koi extra salah ya bakwaas nahi, bas seedha jawab.
 
 DATA:
 ${ctx}`;
-    const model = env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct";
-    const r = await env.AI.run(model, {
-      messages: [{ role: "system", content: sys }, { role: "user", content: question }],
-      max_tokens: 500, temperature: 0.2,
-    });
-    const ans = (r && (r.response || r.result || (typeof r === "string" ? r : ""))) || "";
-    const clean = String(ans).trim();
-    if (!clean) return askBotRules(env, q);
-    return clean;
+    const messages = [{ role: "system", content: sys }, { role: "user", content: question }];
+    const cached = await getSetting(env, "ai_model_ok");
+    const candidates = [env.AI_MODEL, cached,
+      "@cf/meta/llama-3.1-8b-instruct-fp8",
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "@cf/qwen/qwen3-30b-a3b-fp8",
+      "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "@cf/meta/llama-3.2-3b-instruct",
+    ].filter((m, i, a) => m && a.indexOf(m) === i);
+    for (const model of candidates) {
+      try {
+        const r = await env.AI.run(model, { messages, max_tokens: 500, temperature: 0.2 });
+        const clean = String((r && (r.response || r.result)) || (typeof r === "string" ? r : "")).trim();
+        if (clean) { if (cached !== model) await setSetting(env, "ai_model_ok", model); return clean; }
+      } catch (e) { /* agla model try karo */ }
+    }
+    return askBotRules(env, q);
   } catch (e) {
     return askBotRules(env, q);
   }
