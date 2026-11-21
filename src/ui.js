@@ -769,6 +769,15 @@ export function emailHtml({ kind, code, message, firstRun, changes = [], metrics
     <div style="margin-top:20px">${btn}</div></div></div>`;
 
   if (kind === "error") {
+    // Stock alerts — error nahi, stock reminder
+    const stock = { DIGEST: ["⚠️ Stock digest", "#A86A12", "Ye low/out-of-stock products hain. Stock page par units update kijiye. Ye digest din me kuch baar aata hai, har order par nahi."],
+      OOS: ["⛔ Out of stock", "#BF3A2B", "Ye product khatam ho gaye. Restock karke Stock page par units bhariye."],
+      DECLARE: ["⚠️ Stock declare karo", "#A86A12", "Ye products portal par IN STOCK hain par app me unki units set nahi. Stock page par bhariye warna order track nahi hoga."] };
+    if (stock[code]) {
+      const [h, col, foot] = stock[code];
+      return wrap(`<h2 style="margin:6px 0 10px;font-size:19px;color:${col}">${h}</h2>
+        <p style="margin:0 0 8px;font-size:14px;white-space:pre-line">${esc(message)}</p><p style="margin:0;font-size:14px;color:#7B7168">${foot}</p>`);
+    }
     const fix = code === "SESSION"
       ? "Chrome mein supplier.kirana.club par login kariye, phir dashboard kholiye aur naya cookie paste kariye (steps wahin likhe hain). Monitoring apne aap wapas chalu ho jayegi."
       : code === "CONFIG" ? "Portal adapter set hona baaki hai." : "Agla check 30 minute mein apne aap hoga. Ye error baar baar aaye to dashboard dekhiye.";
