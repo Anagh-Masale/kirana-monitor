@@ -455,8 +455,19 @@ async function loadDashboard(env) {
   const cleanup = (await q("SELECT msg_id,ts,mail_ts,subject FROM cleanup_log WHERE ts > ? ORDER BY ts DESC LIMIT 2000", now - 30 * 864e5).all()).results;
   const lastEvent = d_lastEvent(events.results);
   const [cur, prv] = okRuns.results;
+  // Daily average orders — pehle mahine (jab Anagh shuru hua) first-order wale din se; aage har mahine 1st se
+  const istN = new Date(now + 5.5 * 3600000);
+  const monthStart = Date.UTC(istN.getUTCFullYear(), istN.getUTCMonth(), 1);
+  const todayStart = Date.UTC(istN.getUTCFullYear(), istN.getUTCMonth(), istN.getUTCDate());
+  const ots = recentOrders.results.map((r) => placedTs(r.placed_at, now)).filter((x) => x != null);
+  const firstEver = ots.length ? Math.min(...ots) : monthStart;
+  const periodStart = Math.max(monthStart, firstEver);
+  const ordersInPeriod = ots.filter((x) => x >= periodStart && x <= todayStart).length;
+  const avgDays = Math.max(1, Math.round((todayStart - periodStart) / 864e5) + 1);
+  const dailyAvg = { avg: Math.round((ordersInPeriod / avgDays) * 10) / 10, orders: ordersInPeriod, days: avgDays, since: periodStart };
   return {
     now,
+    dailyAvg,
     lastRun,
     latest: cur ? { ts: cur.ts, metrics: JSON.parse(cur.metrics || "{}"), counts: JSON.parse(cur.status_counts || "{}") } : null,
     previous: prv ? { metrics: JSON.parse(prv.metrics || "{}") } : null,
@@ -1032,6 +1043,13 @@ async function askBot(env, q) {
     let out = o.length ? `⛔ App me OOS:\n` + o.map((r) => `• ${r.name || r.sku}`).join("\n") : "";
     if (po.length) out += (out ? "\n\n" : "") + `Portal par OOS:\n` + po.map((r) => `• ${r.name || r.sku}`).join("\n");
     return out || "✅ Kuch bhi out of stock nahi.";
+  }
+
+  // ---------- Daily average orders ----------
+  if (has("per day", "daily", "din ka", "rozana", "prati din", "har din") || (has("average", "avg", "aausat") && has("order") && !has("value", "amount", "rupay", "rupee", "kitne ka"))) {
+    const a = d.dailyAvg || {};
+    const since = a.since ? new Date(a.since).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "";
+    return `📈 Daily average: ${a.avg ?? 0} orders/din\n${a.orders ?? 0} orders ÷ ${a.days ?? 0} din${since ? " (" + since + " se)" : ""}`;
   }
 
   // ---------- Date range ----------

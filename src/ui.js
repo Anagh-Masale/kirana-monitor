@@ -33,6 +33,7 @@ button:active{transform:translateY(1px)}
 .kpi .l{color:var(--muted);font-size:12.5px;font-weight:600;line-height:1.25}
 .kpi .v{font-size:26px;font-weight:800;letter-spacing:-.5px;margin-top:5px;font-variant-numeric:tabular-nums}
 .kpi .d{font-size:12px;margin-top:5px;font-weight:700;color:var(--muted)}
+.avgcard{border-color:var(--gold);background:linear-gradient(180deg,#FFFDF8,#FDF8EE)}.avgcard .v{color:var(--accent-dark)}
 .kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--bad)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;font-size:13.5px;font-weight:600}
@@ -586,10 +587,14 @@ export function dashboardPage(d, env, lang) {
   const prev = d.previous?.metrics || {};
   const counts = d.latest?.counts || {};
 
-  const kpis = Object.keys(metrics).length
+  const da = d.dailyAvg || {};
+  const avgCard = `<div class="card kpi avgcard"><div class="l">${lang === "hi" ? "Daily average orders" : "Avg orders / day"}</div>
+    <div class="v">${da.avg != null ? da.avg : "–"}</div>
+    <div class="d">${da.orders || 0} orders · ${da.days || 0} din</div></div>`;
+  const kpis = avgCard + (Object.keys(metrics).length
     ? Object.entries(metrics).map(([k, v]) => `<div class="card kpi"><div class="l">${esc(k)}</div>
         <div class="v">${esc(fmtVal(k, v))}</div>${delta(k, v, prev[k], t)}</div>`).join("")
-    : `<div class="card kpi"><div class="l">Data</div><div class="v">–</div><div class="d">${t("noData")}</div></div>`;
+    : `<div class="card kpi"><div class="l">Data</div><div class="v">–</div><div class="d">${t("noData")}</div></div>`);
 
   const order = ["new", "info", "warn", "good", "bad", "mute"];
   const chips = Object.entries(counts)
