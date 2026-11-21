@@ -145,6 +145,16 @@ async function route(req, env) {
     if (!email || !code) return Response.json({ ok: false, error: "Email aur OTP dono daaliye" });
     return Response.json(await loginVerify(env, String(email).trim(), String(code).trim()).catch((e) => ({ ok: false, error: String(e).slice(0, 120) })));
   }
+  if (p === "/api/ai-test") {
+    if (!env.AI) return Response.json({ ok: false, reason: "env.AI binding missing — wrangler.toml [ai] binding ya deploy problem" });
+    const model = env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+    try {
+      const r = await env.AI.run(model, { messages: [{ role: "user", content: "Reply with exactly: AI OK" }], max_tokens: 20 });
+      return Response.json({ ok: true, model, response: r?.response ?? r, raw: r });
+    } catch (e) {
+      return Response.json({ ok: false, model, error: String(e && e.message || e) });
+    }
+  }
   if (p === "/api/ask" && post) {
     const { q } = await req.json().catch(() => ({}));
     return Response.json({ answer: await askBot(env, q || "").catch(() => "Abhi jawab nahi de paya.") });
