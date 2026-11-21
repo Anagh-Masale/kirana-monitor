@@ -509,6 +509,7 @@ async function syncPortalStatus(env) {
   await ensureInventory(env);
   const cat = await fetchCatalog(env).catch(() => []);
   if (!cat.length) return;
+  const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
   const rows = new Map((await env.DB.prepare("SELECT * FROM inventory").all()).results.map((r) => [String(r.product_id), r]));
   const now = Date.now();
   const notes = [], declareNeed = [];
@@ -516,6 +517,9 @@ async function syncPortalStatus(env) {
     const po = c.is_oos ? 1 : 0;
     const inv = rows.get(c.product_id);
     if (!inv) continue;
+    // portal ka min-order-qty (pack_size) yahan auto sync
+    const moq = meta[c.product_id]?.pack_size;
+    if (moq && Number(inv.min_qty) !== Number(moq)) await env.DB.prepare("UPDATE inventory SET min_qty=? WHERE product_id=?").bind(Number(moq), c.product_id).run();
     if (inv.portal_seen && Number(inv.portal_oos) !== po) {
       notes.push(`Portal: ${inv.name || c.name} ab ${po ? "OUT OF STOCK" : "IN STOCK"}`);
       if (!po && (!inv.tracking || Number(inv.units) <= 0)) declareNeed.push(inv.name || c.name);

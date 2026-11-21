@@ -180,10 +180,20 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .chk{display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;cursor:pointer}
 .btn.mini{padding:8px 14px;font-size:13px}
 .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
-.sched{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);font-weight:700;margin-left:auto}
+.sched{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);font-weight:700}
 .sched input{font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff}
 .sbadge.warn{background:var(--warn-bg);color:var(--warn)}
-.tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--mute-bg);color:var(--muted);font-size:10px;font-weight:800;font-style:italic;cursor:pointer;vertical-align:middle;margin-left:3px}
+.sfilters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;max-width:880px}
+.ssearch{flex:1;min-width:180px;font:inherit;font-size:14px;padding:10px 13px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
+.ssearch:focus{outline:none;border-color:var(--accent)}
+.schips{display:flex;gap:7px;flex-wrap:wrap}
+.schip{padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap}
+.schip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.srow3{display:flex;gap:10px;align-items:flex-end;margin-top:12px}
+.tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--mute-bg);color:var(--muted);font-size:10px;font-weight:800;font-style:italic;cursor:pointer;vertical-align:middle;margin-left:3px}
+.tipbub{display:none;position:absolute;bottom:135%;left:-6px;width:200px;max-width:62vw;background:var(--ink);color:#fff;font-size:12px;font-weight:500;font-style:normal;line-height:1.45;padding:9px 11px;border-radius:10px;z-index:35;box-shadow:0 8px 22px rgba(45,32,22,.28);text-align:left;white-space:normal}
+.tip.open .tipbub{display:block}
+.in-min[readonly]{background:var(--mute-bg);color:var(--muted);cursor:not-allowed}
 .bundlerow{margin-top:7px}.bundleline{font-size:12px;color:var(--accent-dark);font-weight:700;background:var(--mute-bg);padding:3px 9px;border-radius:7px;display:inline-block}
 .declare{margin:8px 0 2px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:7px 10px;border-radius:9px;line-height:1.4}
 @media(max-width:620px){.srow{padding:14px}.sctrl{grid-template-columns:1fr 1fr;gap:10px}.sched{margin-left:0;width:100%}.sched input{width:100%}}
@@ -352,7 +362,13 @@ function toggleNotif(){var p=document.getElementById("notifpanel");var open=!p.c
   p.querySelectorAll(".nprow.unseen").forEach(function(r){r.classList.remove("unseen");});
   fetch("/api/notif/seen",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:Number(last)||0})}).catch(function(){});}}
 function sRow(b){return b.closest(".srow");}
-function tipShow(m){toast("ℹ️ Info",m,false);}
+var tipT;function tipToggle(el){document.querySelectorAll(".tip.open").forEach(function(t){if(t!==el)t.classList.remove("open");});
+ el.classList.toggle("open");clearTimeout(tipT);if(el.classList.contains("open"))tipT=setTimeout(function(){el.classList.remove("open");},4500);}
+var stFilter="all";
+function stChip(el,f){stFilter=f;document.querySelectorAll(".schip").forEach(function(c){c.classList.remove("on");});el.classList.add("on");filterStock();}
+function filterStock(){var si=document.getElementById("ssearch");var q=(si&&si.value||"").toLowerCase().trim();
+ document.querySelectorAll("#stocklist .srow").forEach(function(r){var nm=r.dataset.name||"";var st=r.dataset.st||"";
+  var ok=(!q||nm.indexOf(q)>=0)&&(stFilter==="all"||st===stFilter);r.style.display=ok?"":"none";});}
 async function saveStock(btn){var r=sRow(btn),o=btn.textContent;btn.textContent="…";
  var body={product_id:r.dataset.pid,units:+r.querySelector(".in-units").value,per_bundle:+r.querySelector(".in-pb").value,threshold:+r.querySelector(".in-thr").value,min_qty:+r.querySelector(".in-min").value,tracking:r.querySelector(".in-track").checked,auto_oos:r.querySelector(".in-auto").checked};
  try{var j=await (await fetch("/api/stock/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)})).json();
@@ -495,27 +511,37 @@ function insightsView(d, t) {
   return `<div class="ihead">${t("topByUnits")}</div>${bars}<div class="idiv"></div><div class="ihead">${t("allProducts")}</div>${list}`;
 }
 
-function tip(msg) { return `<span class="tip" onclick="tipShow('${esc(msg).replace(/'/g, "\\'")}')" title="${esc(msg)}">i</span>`; }
+function tip(msg) { return `<span class="tip" onclick="tipToggle(this)">i<span class="tipbub">${esc(msg)}</span></span>`; }
 function stockView(d, t) {
   const rows = (d.inventory && d.inventory.rows) || [];
   if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke portal catalog se poori product list aa jayegi, phir har product ki units set kar dijiye.</div>
     <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Portal se products laao</button>`;
   const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;
+  const cnt = (f) => rows.filter((r) => (r.tracking ? r.status : (Number(r.portal_oos) ? "oos" : "in_stock")) === f).length;
+  const header = `<div class="sfilters">
+    <input class="ssearch" id="ssearch" placeholder="🔍 Product dhoondo…" oninput="filterStock()" autocomplete="off">
+    <div class="schips">
+      <span class="schip on" data-f="all" onclick="stChip(this,'all')">Sabhi ${rows.length}</span>
+      <span class="schip" data-f="in_stock" onclick="stChip(this,'in_stock')">In stock ${cnt("in_stock")}</span>
+      <span class="schip" data-f="low" onclick="stChip(this,'low')">Low ${cnt("low")}</span>
+      <span class="schip" data-f="oos" onclick="stChip(this,'oos')">OOS ${cnt("oos")}</span>
+    </div></div>`;
   const list = rows.map((r) => {
     const pb = Number(r.per_bundle) || 0;
     const bundleInfo = pb ? `<span class="bundleline">= ${Math.floor(r.units / pb)} bundle + ${r.units % pb} pcs</span>` : "";
     const portalOos = Number(r.portal_oos) === 1;
+    const effSt = r.tracking ? r.status : (portalOos ? "oos" : "in_stock");
     const mismatch = r.tracking && ((r.status === "oos" && !portalOos) || (r.status !== "oos" && portalOos && Number(r.units) > 0));
     const declareNeed = !portalOos && (!r.tracking || Number(r.units) <= 0);
-    return `<div class="srow ${r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}">
+    return `<div class="srow ${r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}" data-name="${esc((r.name || r.sku || "").toLowerCase())}" data-st="${effSt}">
     <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}
-      <span class="sbadge ${portalOos ? "oos" : "ok"}" title="Portal par status">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn" title="App aur portal alag">⚠ mismatch</span>` : ""}</div>
+      <span class="sbadge ${portalOos ? "oos" : "ok"}">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn">⚠ mismatch</span>` : ""}</div>
     ${declareNeed ? `<div class="declare">Portal par IN STOCK hai par yahan stock declare nahi — units bhariye warna order aayega aur track nahi hoga.</div>` : ""}
     <div class="sctrl">
       <label>Units bache (pcs) ${tip("Abhi kitne single pieces/sachet bache hain. Order aate hi apne aap ghatega.")}<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
-      <label>Pcs per bundle ${tip("1 packet/bundle me kitne pcs. Jaise 20. Bundles isi se dikhega. Khaali/0 = sirf pcs.")}<input type="number" class="in-pb" value="${pb}" min="0" inputmode="numeric"></label>
+      <label>Pcs per bundle ${tip("1 packet/bundle me kitne pcs (jaise 20). Bundles isi se dikhega. Khaali/0 = sirf pcs.")}<input type="number" class="in-pb" value="${pb}" min="0" inputmode="numeric"></label>
       <label>Alert &lt;= ${tip("Units itne ya kam hote hi LOW alert jata hai.")}<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label>
-      <label>Min order qty ${tip("1 order me kitne pcs jaate hain (portal se). Sirf jaankari ke liye.")}<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric"></label>
+      <label>Min order qty ${tip("1 order me kitne pcs jaate hain — portal se auto aata hai. Portal pe badlo to yahan apne aap update.")}<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric" readonly></label>
     </div>
     ${bundleInfo ? `<div class="bundlerow">${bundleInfo}</div>` : ""}
     <div class="srow2">
@@ -523,13 +549,12 @@ function stockView(d, t) {
       <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-sync ${tip("On = stock 0 hote hi portal par OOS, aur stock aate hi wapas IN STOCK — apne aap.")}</label>
       <button class="btn mini" onclick="saveStock(this)">Save</button>
       ${portalOos ? `<button class="btn mini ghost" onclick="markInStock(this)">Portal IN-STOCK karo</button>` : `<button class="btn mini ghost" onclick="markOOSNow(this)">Portal OOS karo</button>`}
-      <label class="sched">Schedule OOS ${tip("Is date/time par apne aap OOS ho jayega.")}<input type="datetime-local" class="in-when"></label>
-      <button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button>
     </div>
+    <div class="srow3"><label class="sched">Schedule OOS ${tip("Is date/time par apne aap portal par OOS ho jayega.")}<input type="datetime-local" class="in-when"></label><button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button></div>
   </div>`;
   }).join("");
-  return `<div class="sub" style="margin-bottom:14px">${t("stockSub")}</div>${list}
-    <button class="btn ghost" style="margin-top:6px" onclick="discoverStock(this)">↺ Portal se aur products laao</button>`;
+  return `<div class="sub" style="margin-bottom:14px">${t("stockSub")}</div>${header}<div id="stocklist">${list}</div>
+    <button class="btn ghost" style="margin-top:6px" onclick="discoverStock(this)">↺ Portal se dubara laao (status + min-qty refresh)</button>`;
 }
 
 function stars(n) {
