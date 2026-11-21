@@ -237,12 +237,15 @@ async function route(req, env) {
       if (!f2) return Response.json({ ok: false, found: 0, total: 0, reason: "Portal se product list nahi mili — cookie/login shayad expire ho gaya. Settings me dubara Gmail login kijiye, phir try." });
       return Response.json({ ok: true, found: f2, total: f2 });
     }
+    // Seller ne portal par jo min-order-qty (pack_size) set kiya wo auto laao
+    const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
     let found = 0, updated = 0;
     for (const c of cat) {
-      const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
-        .bind(c.product_id, c.sku, c.name, 0, 1, 5, "in_stock", 0, Date.now()).run();
+      const moq = meta[c.product_id]?.pack_size || 1;
+      const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,portal_oos,portal_seen,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(c.product_id, c.sku, c.name, 0, moq, 5, "in_stock", 0, c.is_oos ? 1 : 0, 1, Date.now()).run();
       if (r.meta && r.meta.changes) found++;
-      else { await env.DB.prepare("UPDATE inventory SET sku=CASE WHEN sku='' OR sku IS NULL THEN ? ELSE sku END, name=? WHERE product_id=?").bind(c.sku, c.name, c.product_id).run(); updated++; }
+      else { await env.DB.prepare("UPDATE inventory SET sku=CASE WHEN sku='' OR sku IS NULL THEN ? ELSE sku END, name=?, min_qty=?, portal_oos=?, portal_seen=1 WHERE product_id=?").bind(c.sku, c.name, moq, c.is_oos ? 1 : 0, c.product_id).run(); updated++; }
     }
     return Response.json({ ok: true, found, updated, total: cat.length });
   }
@@ -658,6 +661,22 @@ async function maybeSendLowDigest(env) {
 // Portal par OOS mark (gated: endpoint capture hone tak sirf event; capture ke baad real)
 async function markOOSOnPortal(env, product) {
   return updateProductOOS(env, product.product_id, true);
+}
+// Seller ne portal par jo set kiya (pack_size = min order qty, mrp, rate) — edit/list se
+async function fetchEditMeta(env, ids) {
+  if (!ids || !ids.length) return {};
+  const j = await gwPost(env, "/dlg/auth/v1/b2b/seller-products/edit/list", { data: { product_ids: ids.map(Number) } });
+  const edits = j?.data?.edits;
+  const map = {};
+  if (Array.isArray(edits)) {
+    for (const e of edits) {
+      const pid = String(e.product_id), m = e.meta || {};
+      if (m.pack_size == null) continue;
+      // APPROVED ko preference, warna last
+      if (!map[pid] || e.status === "APPROVED") map[pid] = { pack_size: Number(m.pack_size) || 1, mrp: Number(m.mrp_number) || null, rate: Number(m.wholesale_rate) || null, grammage: m.grammage, unit: m.grammage_unit };
+    }
+  }
+  return map;
 }
 // Poora catalog ek call me (seed ke liye best) — get_products
 async function fetchCatalog(env) {
