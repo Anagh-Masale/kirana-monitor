@@ -693,7 +693,7 @@ async function fetchHomeCards(env) {
   const res = await fetch(base + "/dlg/auth/v1/b2b/home", { method: "GET", headers: { ...GW_HEADERS, cookie } }).catch(() => null);
   if (!res) return [];
   const j = await res.json().catch(() => null);
-  const cards = j?.data?.cards;
+  const cards = j?.data?.tips?.cards || j?.data?.cards;
   return Array.isArray(cards) ? cards : [];
 }
 // Seller ne portal par jo set kiya (pack_size = min order qty, mrp, rate) — edit/list se
