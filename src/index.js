@@ -1050,28 +1050,83 @@ function placedTs(s, nowTs) {
 function istDay(ts) { const d = new Date(ts + 5.5 * 3600000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 
 // AI assistant — query engine (free, exact, data app me hi rehta hai)
-// Bot ke liye poora data ek compact text me (AI ko bhejne ke liye)
+// Bot ke liye app ka POORA data + business signals ek text me (AI ko bhejne ke liye)
 function buildBotContext(d) {
   const rupee = (v) => "₹" + Math.round(Number(v) || 0).toLocaleString("en-IN");
   const L = [];
   const now = d.now || Date.now();
-  L.push("AAJ KI DATE: " + new Date(now + 5.5 * 3600000).toISOString().slice(0, 10) + " (IST)");
+  L.push("=== ANAGH MASALE — Kirana Club seller data ===");
+  L.push("AAJ: " + new Date(now + 5.5 * 3600000).toISOString().slice(0, 10) + " (IST). Brand: Anagh Masale, premium spice brand, Kirana Club B2B marketplace par bechti hai.");
+
   const da = d.dailyAvg || {};
-  if (da.avg != null) L.push(`DAILY AVERAGE: ${rupee(da.avgSale)}/din, ${da.avg} orders/din (${da.days} din me ${da.orders} orders, total ${rupee(da.totalSale)})`);
+  if (da.avg != null) L.push(`DAILY AVERAGE: ${rupee(da.avgSale)}/din sale, ${da.avg} orders/din (is period me ${da.days} din, ${da.orders} orders, total ${rupee(da.totalSale)}).`);
   const m = d.latest?.metrics || {};
-  if (Object.keys(m).length) L.push("METRICS: " + Object.entries(m).map(([k, v]) => `${k}=${/sale|value/i.test(k) && typeof v === "number" ? rupee(v) : v}`).join(", "));
+  if (Object.keys(m).length) L.push("METRICS: " + Object.entries(m).map(([k, v]) => `${k}=${/sale|value/i.test(k) && typeof v === "number" ? rupee(v) : v}`).join(", ") + ".");
   const c = d.latest?.counts || {};
-  if (Object.keys(c).length) L.push("STATUS COUNTS: " + Object.entries(c).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}=${n}`).join(", "));
+  if (Object.keys(c).length) L.push("STATUS COUNTS: " + Object.entries(c).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}=${n}`).join(", ") + ".");
+
   const orders = d.orders || [];
-  L.push(`ORDERS (${orders.length}) [id | date | status | amount | customer | payment]:`);
-  for (const o of orders.slice(0, 120)) L.push(`#${o.id} | ${o.placed_at || "?"} | ${o.status || "?"} | ₹${Math.round(Number(o.amount) || 0)} | ${o.customer || "-"} | ${o.payment || "-"}`);
-  const inv = (d.inventory?.rows || []).filter((r) => r.tracking || Number(r.portal_oos));
+  // derived signals
+  const amt = (o) => Number(o.amount) || 0;
+  const byCust = {}, byCity = {};
+  for (const o of orders) { if (o.customer) byCust[o.customer] = (byCust[o.customer] || 0) + 1; if (o.city) byCity[o.city] = (byCity[o.city] || 0) + 1; }
+  const repeat = Object.entries(byCust).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+  const topCities = Object.entries(byCity).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const ndr = orders.filter((o) => /ndr/i.test(o.status || "")).length;
+  const rto = orders.filter((o) => /rto/i.test(o.status || "")).length;
+  const cancelled = orders.filter((o) => /cancel/i.test(o.status || "")).length;
+  const delivered = orders.filter((o) => /deliver/i.test(o.status || "")).length;
+  const codN = orders.filter((o) => /cod/i.test(o.payment || "")).length;
+
+  L.push("");
+  L.push("BUSINESS SIGNALS (derived):");
+  L.push(`- Total tracked orders: ${orders.length}. Delivered ${delivered}, NDR ${ndr}, RTO ${rto}, Cancelled ${cancelled}. COD orders: ${codN}/${orders.length}.`);
+  if (repeat.length) L.push(`- Repeat customers: ${repeat.length} (${repeat.slice(0, 5).map(([n, k]) => `${n}×${k}`).join(", ")}).`);
+  if (topCities.length) L.push(`- Top areas: ${topCities.map(([ci, n]) => `${ci}(${n})`).join(", ")}.`);
+
+  const inv = (d.inventory?.rows || []);
+  const oosNow = inv.filter((r) => Number(r.portal_oos) === 1 || (r.tracking && r.status === "oos"));
+  if (oosNow.length) L.push(`- ABHI OUT OF STOCK (sale ruk rahi hai): ${oosNow.map((r) => r.name || r.sku).join(", ")}.`);
+  const lowNow = inv.filter((r) => r.tracking && r.status === "low");
+  if (lowNow.length) L.push(`- LOW stock: ${lowNow.map((r) => `${r.name || r.sku}(${r.units})`).join(", ")}.`);
+
+  const ins = d.insights?.items || [];
+  if (ins.length) {
+    const sorted = [...ins].sort((a, b) => (b.orders || 0) - (a.orders || 0));
+    L.push(`- Top sellers (orders): ${sorted.slice(0, 3).map((p) => `${p.name}(${p.orders || 0})`).join(", ")}. Weak sellers: ${sorted.slice(-3).map((p) => `${p.name}(${p.orders || 0})`).join(", ")}.`);
+  }
+  const rts = d.ratings;
+  if (rts && rts.products) {
+    const low = rts.products.filter((p) => p.rating && Number(p.rating) < 4 && p.reviews).map((p) => `${p.name}(${Number(p.rating).toFixed(1)}★)`);
+    if (low.length) L.push(`- Kam rating wale products: ${low.join(", ")}.`);
+  }
+
+  L.push("");
+  L.push(`ORDERS (${orders.length}) [id | date | status | amount | customer | city | payment]:`);
+  for (const o of orders.slice(0, 150)) L.push(`#${o.id} | ${o.placed_at || "?"} | ${o.status || "?"} | ₹${Math.round(amt(o))} | ${o.customer || "-"} | ${o.city || "-"} | ${o.payment || "-"}`);
+
   if (inv.length) {
-    L.push("STOCK [product | app_units pcs | status | portal | per_bundle | min_order_pcs]:");
+    L.push("");
+    L.push("STOCK [product | app_units_pcs | status | portal | per_bundle | min_order_pcs]:");
     for (const r of inv) L.push(`${r.name || r.sku} | ${r.units} | ${r.tracking ? r.status : "track-off"} | portal ${Number(r.portal_oos) ? "OOS" : "in-stock"} | bundle=${r.per_bundle || "-"} | moq=${r.min_qty}`);
   }
-  const ins = d.insights?.items || [];
-  if (ins.length) L.push("TOP PRODUCTS (30din units): " + ins.slice(0, 10).map((p) => `${p.name}=${p.units}${p.oos ? "(OOS)" : ""}`).join(", "));
+  if (ins.length) {
+    L.push("");
+    L.push("PRODUCT-WISE SALES (pichhle 30 din) [product | units_bike | kitne_orders]:");
+    for (const p of ins) L.push(`${p.name} | ${p.units} | ${p.orders || 0}${p.oos ? " | OOS" : ""}`);
+  }
+  if (rts && (rts.summary || (rts.products && rts.products.length))) {
+    L.push("");
+    const s = rts.summary || {};
+    L.push(`RATINGS: overall ${s.average_rating ? Number(s.average_rating).toFixed(1) + "★" : "–"} (${s.total_ratings || 0} ratings, ${s.total_reviews || 0} reviews).`);
+    if (rts.products && rts.products.length) L.push("Per product: " + rts.products.filter((p) => p.rating).map((p) => `${p.name}=${Number(p.rating).toFixed(1)}★(${p.reviews || 0}rev)`).join(", ") + ".");
+  }
+  const sugg = d.suggestions || [];
+  if (sugg.length) {
+    L.push("");
+    L.push("KIRANA KE SUGGESTIONS (seller app se):");
+    for (const cd of sugg) if (cd && cd.title) L.push(`- ${cd.title}${cd.product?.name ? " (" + cd.product.name + ")" : ""}: ${cd.line || ""}`);
+  }
   return L.join("\n");
 }
 // AI-powered bot (Cloudflare Workers AI). AI na ho/fail ho to rules par gir jao.
@@ -1082,29 +1137,29 @@ async function askBot(env, q) {
   try {
     const d = await loadDashboard(env);
     const ctx = buildBotContext(d);
-    const sys = `Tum Anagh Masale ke Kirana Club seller dashboard ke assistant ho. Niche diye DATA se hi jawab do.
-Rules:
-- Sirf is DATA se jawab do. Jo DATA me nahi hai, saaf bolo "ye data app me nahi hai".
-- Hinglish me, chhota aur seedha jawab. Zaroorat ho to hi list/line-break.
-- Count/total/average maanga ho to khud ginti/jod ke exact number do (amount ₹ me).
-- "stock" ka matlab STOCK section (app_units/portal), "sale/order" ka matlab ORDERS/METRICS.
-- Product ka naam poora match karo (sirf "masala" se koi bhi product mat pakdo).
-- Koi extra salah ya bakwaas nahi, bas seedha jawab.
+    const sys = `Tum Anagh Masale ke business analyst + Kirana Club seller advisor ho. Neeche is seller ka POORA live data hai. Tumhe is data ko samajh kar, sochkar, har tarah ke sawaal ka sahi, practical jawab dena hai — chahe simple ho (kitne orders, kaunsa stock) ya business advice (sale kaise badhe, kya improve karun).
 
-DATA:
+Kaam karne ka tareeka:
+- Sirf is DATA ko base banao. Jo number DATA me hai wahi do; jo bilkul nahi hai use saaf bolo, galat number mat banao.
+- Count/total/average khud ginti/jod ke EXACT do (paise ₹ me). Dhyaan se jodo.
+- Business sawaal (jaise "sale kaise badhaun", "kya theek karun", "kya dikkat hai") par — DATA ke BUSINESS SIGNALS, OOS products, NDR/RTO, low ratings, weak sellers, Kirana ke suggestions, repeat customers, top areas — in sab ko dekhkar 3-5 concrete, numbers-wale, actionable points do jo is seller par lagu hote hain (generic gyaan nahi). Jaise "X out of stock hai, usse roz ki sale ruk rahi hai — restock karo", "NDR Y hai, COD confirm karo".
+- "stock" = STOCK section; kisi product ke orders/units = PRODUCT-WISE SALES; aaj/kal ki sale = ORDERS/METRICS.
+- Product naam poora match karo (sirf "masala" se koi bhi mat pakdo).
+- Tone: seedha, practical, Hinglish (user jis bhasha me poochhe us hisaab se). Zaroorat ho tabhi points/line-break. Koi jhooth ya khokhli tareef nahi.
+
 ${ctx}`;
     const messages = [{ role: "system", content: sys }, { role: "user", content: question }];
     const cached = await getSetting(env, "ai_model_ok");
     const candidates = [env.AI_MODEL, cached,
-      "@cf/meta/llama-3.1-8b-instruct-fp8",
       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       "@cf/qwen/qwen3-30b-a3b-fp8",
       "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "@cf/openai/gpt-oss-20b",
       "@cf/meta/llama-3.2-3b-instruct",
     ].filter((m, i, a) => m && a.indexOf(m) === i);
     for (const model of candidates) {
       try {
-        const r = await env.AI.run(model, { messages, max_tokens: 500, temperature: 0.2 });
+        const r = await env.AI.run(model, { messages, max_tokens: 900, temperature: 0.3 });
         const clean = String((r && (r.response || r.result)) || (typeof r === "string" ? r : "")).trim();
         if (clean) { if (cached !== model) await setSetting(env, "ai_model_ok", model); return clean; }
       } catch (e) { /* agla model try karo */ }
