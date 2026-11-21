@@ -1036,7 +1036,63 @@ function placedTs(s, nowTs) {
 function istDay(ts) { const d = new Date(ts + 5.5 * 3600000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 
 // AI assistant — query engine (free, exact, data app me hi rehta hai)
+// Bot ke liye poora data ek compact text me (AI ko bhejne ke liye)
+function buildBotContext(d) {
+  const rupee = (v) => "₹" + Math.round(Number(v) || 0).toLocaleString("en-IN");
+  const L = [];
+  const now = d.now || Date.now();
+  L.push("AAJ KI DATE: " + new Date(now + 5.5 * 3600000).toISOString().slice(0, 10) + " (IST)");
+  const da = d.dailyAvg || {};
+  if (da.avg != null) L.push(`DAILY AVERAGE: ${rupee(da.avgSale)}/din, ${da.avg} orders/din (${da.days} din me ${da.orders} orders, total ${rupee(da.totalSale)})`);
+  const m = d.latest?.metrics || {};
+  if (Object.keys(m).length) L.push("METRICS: " + Object.entries(m).map(([k, v]) => `${k}=${/sale|value/i.test(k) && typeof v === "number" ? rupee(v) : v}`).join(", "));
+  const c = d.latest?.counts || {};
+  if (Object.keys(c).length) L.push("STATUS COUNTS: " + Object.entries(c).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}=${n}`).join(", "));
+  const orders = d.orders || [];
+  L.push(`ORDERS (${orders.length}) [id | date | status | amount | customer | payment]:`);
+  for (const o of orders.slice(0, 120)) L.push(`#${o.id} | ${o.placed_at || "?"} | ${o.status || "?"} | ₹${Math.round(Number(o.amount) || 0)} | ${o.customer || "-"} | ${o.payment || "-"}`);
+  const inv = (d.inventory?.rows || []).filter((r) => r.tracking || Number(r.portal_oos));
+  if (inv.length) {
+    L.push("STOCK [product | app_units pcs | status | portal | per_bundle | min_order_pcs]:");
+    for (const r of inv) L.push(`${r.name || r.sku} | ${r.units} | ${r.tracking ? r.status : "track-off"} | portal ${Number(r.portal_oos) ? "OOS" : "in-stock"} | bundle=${r.per_bundle || "-"} | moq=${r.min_qty}`);
+  }
+  const ins = d.insights?.items || [];
+  if (ins.length) L.push("TOP PRODUCTS (30din units): " + ins.slice(0, 10).map((p) => `${p.name}=${p.units}${p.oos ? "(OOS)" : ""}`).join(", "));
+  return L.join("\n");
+}
+// AI-powered bot (Cloudflare Workers AI). AI na ho/fail ho to rules par gir jao.
 async function askBot(env, q) {
+  const question = String(q || "").trim();
+  if (!question) return "Poochhiye — jaise \"meat masala ka stock\", \"kal kitne orders aaye\", \"in-transit ki total value\", \"aaj ki sale\".";
+  if (!env.AI) return askBotRules(env, q);
+  try {
+    const d = await loadDashboard(env);
+    const ctx = buildBotContext(d);
+    const sys = `Tum Anagh Masale ke Kirana Club seller dashboard ke assistant ho. Niche diye DATA se hi jawab do.
+Rules:
+- Sirf is DATA se jawab do. Jo DATA me nahi hai, saaf bolo "ye data app me nahi hai".
+- Hinglish me, chhota aur seedha jawab. Zaroorat ho to hi list/line-break.
+- Count/total/average maanga ho to khud ginti/jod ke exact number do (amount ₹ me).
+- "stock" ka matlab STOCK section (app_units/portal), "sale/order" ka matlab ORDERS/METRICS.
+- Product ka naam poora match karo (sirf "masala" se koi bhi product mat pakdo).
+- Koi extra salah/bakwaas nahi, bas jawab.
+
+DATA:
+${ctx}`;
+    const model = env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+    const r = await env.AI.run(model, {
+      messages: [{ role: "system", content: sys }, { role: "user", content: question }],
+      max_tokens: 500, temperature: 0.2,
+    });
+    const ans = (r && (r.response || r.result || (typeof r === "string" ? r : ""))) || "";
+    const clean = String(ans).trim();
+    if (!clean) return askBotRules(env, q);
+    return clean;
+  } catch (e) {
+    return askBotRules(env, q);
+  }
+}
+async function askBotRules(env, q) {
   const raw = String(q || "").trim();
   const text = raw.toLowerCase().replace(/[?.!,]/g, " ").replace(/\s+/g, " ");
   if (!text) return "Poochhiye — jaise \"kal kitne orders aaye\", \"in-transit ki total value\", \"Meat Masala ka stock\", \"aaj ki sale\".";
@@ -1120,7 +1176,7 @@ async function askBot(env, q) {
   }
 
   // ---------- Specific product (stock + sales) ----------
-  const stop = ["order","orders","stock","kitna","kitne","konsa","kaunsa","kaunse","product","hai","mera","hua","wala","kya","total","value"];
+  const stop = ["order","orders","stock","stocks","kitna","kitne","konsa","kaunsa","kaunse","product","hai","mera","hua","wala","kya","total","value","masala","masale","gram","packet","bundle","there","many","what","how","much","hain","bache"];
   const words = text.split(" ").filter((w) => w.length > 3 && !stop.includes(w));
   if (words.length) {
     const hit = inv.find((r) => words.some((w) => (r.name || "").toLowerCase().includes(w))) || ins.find((p) => words.some((w) => (p.name || "").toLowerCase().includes(w)));
