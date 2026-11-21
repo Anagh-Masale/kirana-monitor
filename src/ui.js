@@ -588,7 +588,11 @@ export function dashboardPage(d, env, lang) {
   const counts = d.latest?.counts || {};
 
   const da = d.dailyAvg || {};
-  const avgCard = `<div class="card kpi avgcard"><div class="l">${lang === "hi" ? "Daily average orders" : "Avg orders / day"}</div>
+  const rup = (v) => "₹" + Math.round(Number(v) || 0).toLocaleString("en-IN");
+  const avgCard = `<div class="card kpi avgcard"><div class="l">${lang === "hi" ? "Daily average sale" : "Avg sale / day"}</div>
+    <div class="v">${da.avgSale != null ? rup(da.avgSale) : "–"}</div>
+    <div class="d">${rup(da.totalSale || 0)} · ${da.days || 0} din</div></div>` +
+  `<div class="card kpi avgcard"><div class="l">${lang === "hi" ? "Daily average orders" : "Avg orders / day"}</div>
     <div class="v">${da.avg != null ? da.avg : "–"}</div>
     <div class="d">${da.orders || 0} orders · ${da.days || 0} din</div></div>`;
   const kpis = avgCard + (Object.keys(metrics).length

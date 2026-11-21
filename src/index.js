@@ -464,7 +464,9 @@ async function loadDashboard(env) {
   const periodStart = Math.max(monthStart, firstEver);
   const ordersInPeriod = ots.filter((x) => x >= periodStart && x <= todayStart).length;
   const avgDays = Math.max(1, Math.round((todayStart - periodStart) / 864e5) + 1);
-  const dailyAvg = { avg: Math.round((ordersInPeriod / avgDays) * 10) / 10, orders: ordersInPeriod, days: avgDays, since: periodStart };
+  const periodOrders = orders.results.filter((o) => { const x = placedTs(o.placed_at, now); return x != null && x >= periodStart && x <= todayStart; });
+  const totalSale = periodOrders.reduce((a, o) => a + (Number(o.amount) || 0), 0);
+  const dailyAvg = { avg: Math.round((ordersInPeriod / avgDays) * 10) / 10, orders: ordersInPeriod, days: avgDays, since: periodStart, totalSale, avgSale: Math.round(totalSale / avgDays) };
   return {
     now,
     dailyAvg,
@@ -1049,7 +1051,7 @@ async function askBot(env, q) {
   if (has("per day", "daily", "din ka", "rozana", "prati din", "har din") || (has("average", "avg", "aausat") && has("order") && !has("value", "amount", "rupay", "rupee", "kitne ka"))) {
     const a = d.dailyAvg || {};
     const since = a.since ? new Date(a.since).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "";
-    return `📈 Daily average: ${a.avg ?? 0} orders/din\n${a.orders ?? 0} orders ÷ ${a.days ?? 0} din${since ? " (" + since + " se)" : ""}`;
+    return `📈 Daily average (${since} se):\n• ${rupee(a.avgSale || 0)} / din (sale)\n• ${a.avg ?? 0} orders / din\n(${a.orders ?? 0} orders · ${rupee(a.totalSale || 0)} ÷ ${a.days ?? 0} din)`;
   }
 
   // ---------- Date range ----------
