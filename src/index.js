@@ -459,7 +459,7 @@ async function loadDashboard(env) {
     q("SELECT * FROM runs ORDER BY ts DESC LIMIT 1").first(),
     q("SELECT ts,metrics,status_counts FROM runs WHERE ok=1 ORDER BY ts DESC LIMIT 2").all(),
     q("SELECT id,ts,type,title FROM events ORDER BY id DESC LIMIT 150").all(),
-    q("SELECT id,status,amount,customer,city,placed_at,payment,first_seen,updated_at FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 300").all(),
+    q("SELECT id,status,amount,customer,city,placed_at,payment,first_seen,updated_at,detail,items FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 300").all(),
     q("SELECT placed_at, first_seen FROM orders ORDER BY first_seen DESC LIMIT 3000").all(),
     q("SELECT ok FROM runs WHERE ts > ?", now - 864e5).all(),
     getSetting(env, "failing"),
@@ -601,6 +601,16 @@ async function fetchOrderLines(env, id) {
     for (const c of cart) if (c && c.product_id != null) lines.push({ product_id: String(c.product_id), name: c.name || "", qty: Number(c.quantity) || 1 });
   }
   return lines;
+}
+// Har order ke products (items) enrich karo — bot "kis order me kya" bata sake
+async function enrichOrderItems(env, limit) {
+  const rows = (await env.DB.prepare("SELECT id FROM orders WHERE items IS NULL OR items='' ORDER BY CAST(id AS INTEGER) DESC LIMIT ?").bind(limit || 8).all()).results;
+  for (const o of rows) {
+    const lines = await fetchOrderLines(env, o.id).catch(() => []);
+    const s = lines.length ? lines.map((l) => `${l.name || "?"} ×${l.qty}`).join("; ") : "-";
+    await env.DB.prepare("UPDATE orders SET items=? WHERE id=?").bind(s, String(o.id)).run();
+  }
+  return rows.length;
 }
 // Naye orders aane par: product discover + (agar tracked ho to) stock ghatao
 async function applyInventoryForNewOrders(env, ids) {
@@ -1066,11 +1076,18 @@ function buildBotContext(d) {
   if (Object.keys(c).length) L.push("STATUS COUNTS: " + Object.entries(c).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}=${n}`).join(", ") + ".");
 
   const orders = d.orders || [];
+  // detail JSON se address nikaalo
+  const detOf = (o) => { try { return JSON.parse(o.detail || "{}"); } catch { return {}; } };
+  const addrShort = (o) => { const dt = detOf(o); return [dt.store, dt.area || dt.address, dt.city, dt.pincode].filter(Boolean).join(", ") || o.city || "-"; };
+  const pinOf = (o) => (detOf(o).pincode || "").toString().trim();
   // derived signals
   const amt = (o) => Number(o.amount) || 0;
-  const byCust = {}, byCity = {};
-  for (const o of orders) { if (o.customer) byCust[o.customer] = (byCust[o.customer] || 0) + 1; if (o.city) byCity[o.city] = (byCity[o.city] || 0) + 1; }
-  const repeat = Object.entries(byCust).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+  const byCity = {};
+  for (const o of orders) { const dt = detOf(o); const ci = dt.city || o.city; if (ci) byCity[ci] = (byCity[ci] || 0) + 1; }
+  // repeat = same naam AUR same address/pincode (alag pincode = alag customer)
+  const byKey = {};
+  for (const o of orders) { if (!o.customer) continue; const k = o.customer.toLowerCase().trim() + "|" + (pinOf(o) || addrShort(o).toLowerCase()); (byKey[k] = byKey[k] || []).push(o); }
+  const repeat = Object.entries(byKey).filter(([, arr]) => arr.length > 1).sort((a, b) => b[1].length - a[1].length);
   const topCities = Object.entries(byCity).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const ndr = orders.filter((o) => /ndr/i.test(o.status || "")).length;
   const rto = orders.filter((o) => /rto/i.test(o.status || "")).length;
@@ -1081,7 +1098,7 @@ function buildBotContext(d) {
   L.push("");
   L.push("BUSINESS SIGNALS (derived):");
   L.push(`- Total tracked orders: ${orders.length}. Delivered ${delivered}, NDR ${ndr}, RTO ${rto}, Cancelled ${cancelled}. COD orders: ${codN}/${orders.length}.`);
-  if (repeat.length) L.push(`- Repeat customers: ${repeat.length} (${repeat.slice(0, 5).map(([n, k]) => `${n}×${k}`).join(", ")}).`);
+  L.push(`- Repeat customers (same naam + same address/pincode): ${repeat.length}${repeat.length ? " — " + repeat.slice(0, 5).map(([, arr]) => `${arr[0].customer} (${arr.length} orders, ${pinOf(arr[0]) || arr[0].city})`).join("; ") : ". Dhyaan: alag pincode wale same-naam alag customer hain."}`);
   if (topCities.length) L.push(`- Top areas: ${topCities.map(([ci, n]) => `${ci}(${n})`).join(", ")}.`);
 
   const inv = (d.inventory?.rows || []);
@@ -1102,8 +1119,8 @@ function buildBotContext(d) {
   }
 
   L.push("");
-  L.push(`ORDERS (${orders.length}) [id | date | status | amount | customer | city | payment]:`);
-  for (const o of orders.slice(0, 150)) L.push(`#${o.id} | ${o.placed_at || "?"} | ${o.status || "?"} | ₹${Math.round(amt(o))} | ${o.customer || "-"} | ${o.city || "-"} | ${o.payment || "-"}`);
+  L.push(`ORDERS (${orders.length}) [id | date | status | amount | customer | address(area,city,pincode) | payment | products]:`);
+  for (const o of orders.slice(0, 150)) L.push(`#${o.id} | ${o.placed_at || "?"} | ${o.status || "?"} | ₹${Math.round(amt(o))} | ${o.customer || "-"} | ${addrShort(o)} | ${o.payment || "-"} | ${o.items && o.items !== "-" ? o.items : "items abhi load ho rahe"}`);
 
   if (inv.length) {
     L.push("");
@@ -1369,6 +1386,7 @@ async function cronTick(env) {
   await fetchRatings(env).catch(() => {});
   await checkScheduledOOS(env).catch(() => {});
   await syncPortalStatus(env).catch(() => {});
+  await enrichOrderItems(env, 10).catch(() => {});
   await maybeSendLowDigest(env).catch(() => {});
   await dispatch(env);
 }
