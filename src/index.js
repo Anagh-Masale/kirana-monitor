@@ -513,8 +513,10 @@ async function updateProductOOS(env, productID, isOos) {
     data: { seller: env.SELLER_ID || "anagh", productID: Number(productID), updates: [{ key: "is_oos", value: !!isOos }], warehouse_id: Number(env.WAREHOUSE_ID) || 1534 },
   });
   const ok = !!j && !/error/i.test(j.status || "");
+  const nm = (await env.DB.prepare("SELECT name,sku FROM inventory WHERE product_id=?").bind(String(productID)).first());
+  const label = (nm && (nm.name || nm.sku)) || String(productID);
   await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
-    .bind(Date.now(), ok ? "info" : "error", `${ok ? "✅ Portal updated" : "❌ Portal update fail"}: ${productID} → ${isOos ? "OUT OF STOCK" : "IN STOCK"}`).run();
+    .bind(Date.now(), ok ? "info" : "error", `${ok ? "✅ Portal updated" : "❌ Portal update fail"}: ${label} → ${isOos ? "OUT OF STOCK" : "IN STOCK"}`).run();
   if (ok) await env.DB.prepare("UPDATE inventory SET portal_oos=?, portal_seen=1 WHERE product_id=?").bind(isOos ? 1 : 0, String(productID)).run();
   return { ok };
 }
