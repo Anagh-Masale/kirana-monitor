@@ -170,14 +170,38 @@ async function route(req, env) {
     await ensureInventory(env);
     const cur = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(String(b.product_id)).first();
     if (!cur) return Response.json({ ok: false, error: "not-found" });
-    const units = b.units != null ? Math.round(Number(b.units)) : cur.units;
+    const per_bundle = b.per_bundle != null ? Math.max(0, Math.round(Number(b.per_bundle))) : cur.per_bundle;
+    // units bundles+loose se ya seedha units se
+    let units;
+    if (b.bundles != null || b.loose != null) {
+      const pb = per_bundle || 1;
+      units = Math.max(0, Math.round((Number(b.bundles) || 0) * pb + (Number(b.loose) || 0)));
+    } else units = b.units != null ? Math.round(Number(b.units)) : cur.units;
     const min_qty = b.min_qty != null ? Math.max(1, Math.round(Number(b.min_qty))) : cur.min_qty;
     const threshold = b.threshold != null ? Math.max(0, Math.round(Number(b.threshold))) : cur.threshold;
     const tracking = b.tracking != null ? (b.tracking ? 1 : 0) : cur.tracking;
     const auto_oos = b.auto_oos != null ? (b.auto_oos ? 1 : 0) : cur.auto_oos;
-    await env.DB.prepare("UPDATE inventory SET units=?, min_qty=?, threshold=?, tracking=?, auto_oos=?, status=?, updated_at=? WHERE product_id=?")
-      .bind(units, min_qty, threshold, tracking, auto_oos, invStatus(units, threshold), Date.now(), String(b.product_id)).run();
+    const newStatus = invStatus(units, threshold);
+    await env.DB.prepare("UPDATE inventory SET units=?, min_qty=?, threshold=?, tracking=?, auto_oos=?, per_bundle=?, status=?, updated_at=? WHERE product_id=?")
+      .bind(units, min_qty, threshold, tracking, auto_oos, per_bundle, newStatus, Date.now(), String(b.product_id)).run();
+    // Auto-sync ON + stock aa gaya (0→+) + portal par OOS hai → portal par wapas IN STOCK
+    let portal = null;
+    if (tracking && auto_oos && units > 0 && Number(cur.portal_oos) === 1) portal = await updateProductOOS(env, b.product_id, false).catch(() => null);
+    // Auto-sync ON + stock 0 ho gaya + portal in-stock hai → portal OOS
+    if (tracking && auto_oos && units <= 0 && Number(cur.portal_oos) === 0) portal = await updateProductOOS(env, b.product_id, true).catch(() => null);
+    return Response.json({ ok: true, portal });
+  }
+  if (p === "/api/notif/seen" && post) {
+    const b = await req.json().catch(() => ({}));
+    if (b.id != null) await setSetting(env, "notif_seen_id", String(Math.round(Number(b.id)) || 0));
     return Response.json({ ok: true });
+  }
+  if (p === "/api/stock/instock" && post) {
+    const b = await req.json().catch(() => ({}));
+    if (!b.product_id) return new Response("no product", { status: 400 });
+    await ensureInventory(env);
+    const portal = await updateProductOOS(env, b.product_id, false);
+    return Response.json({ ok: true, portal });
   }
   if (p === "/api/stock/oos" && post) {
     const b = await req.json().catch(() => ({}));
@@ -450,15 +474,58 @@ async function loadDashboard(env) {
     errorShotTs: JSON.parse((await getSetting(env, "last_error_shot")) || "null")?.ts || null,
     inventory: await inventoryList(env),
     stockAlert: JSON.parse((await getSetting(env, "stock_alert")) || "null"),
+    notifSeenId: Number(await getSetting(env, "notif_seen_id")) || 0,
   };
 }
 
 // ================= INVENTORY — apna stock, apne app me (source of truth) =================
 async function ensureInventory(env) {
   await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory (product_id TEXT PRIMARY KEY, sku TEXT, name TEXT, units INTEGER DEFAULT 0, min_qty INTEGER DEFAULT 1, threshold INTEGER DEFAULT 5, status TEXT DEFAULT 'in_stock', oos_at INTEGER, auto_oos INTEGER DEFAULT 0, tracking INTEGER DEFAULT 0, updated_at INTEGER)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory (product_id TEXT PRIMARY KEY, sku TEXT, name TEXT, units INTEGER DEFAULT 0, min_qty INTEGER DEFAULT 1, threshold INTEGER DEFAULT 5, status TEXT DEFAULT 'in_stock', oos_at INTEGER, auto_oos INTEGER DEFAULT 0, tracking INTEGER DEFAULT 0, per_bundle INTEGER DEFAULT 0, portal_oos INTEGER DEFAULT 0, portal_seen INTEGER DEFAULT 0, updated_at INTEGER)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS inv_ledger (order_id TEXT, product_id TEXT, qty INTEGER, ts INTEGER, kind TEXT, PRIMARY KEY(order_id, product_id))`),
   ]);
+  for (const col of ["per_bundle INTEGER DEFAULT 0", "portal_oos INTEGER DEFAULT 0", "portal_seen INTEGER DEFAULT 0"]) {
+    await env.DB.prepare(`ALTER TABLE inventory ADD COLUMN ${col}`).run().catch(() => {});
+  }
+}
+// Portal par product ko OOS (true) ya in-stock (false) mark karo — captured endpoint
+async function updateProductOOS(env, productID, isOos) {
+  const email = (await getSetting(env, "seller_email")) || env.SELLER_EMAIL || "anaghmasala@gmail.com";
+  const j = await gwPost(env, "/dlg/auth/v1/b2b/update_product_details", {
+    updated_by: email, request_source: "B2B_EXTERNAL",
+    data: { seller: env.SELLER_ID || "anagh", productID: Number(productID), updates: [{ key: "is_oos", value: !!isOos }], warehouse_id: Number(env.WAREHOUSE_ID) || 1534 },
+  });
+  const ok = !!j && !/error/i.test(j.status || "");
+  await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
+    .bind(Date.now(), ok ? "info" : "error", `${ok ? "✅ Portal updated" : "❌ Portal update fail"}: ${productID} → ${isOos ? "OUT OF STOCK" : "IN STOCK"}`).run();
+  if (ok) await env.DB.prepare("UPDATE inventory SET portal_oos=?, portal_seen=1 WHERE product_id=?").bind(isOos ? 1 : 0, String(productID)).run();
+  return { ok };
+}
+// Two-way sync: portal ka is_oos padho, app me reflect karo, manual change + mismatch detect karo
+async function syncPortalStatus(env) {
+  await ensureInventory(env);
+  const cat = await fetchCatalog(env).catch(() => []);
+  if (!cat.length) return;
+  const rows = new Map((await env.DB.prepare("SELECT * FROM inventory").all()).results.map((r) => [String(r.product_id), r]));
+  const now = Date.now();
+  const notes = [], declareNeed = [];
+  for (const c of cat) {
+    const po = c.is_oos ? 1 : 0;
+    const inv = rows.get(c.product_id);
+    if (!inv) continue;
+    if (inv.portal_seen && Number(inv.portal_oos) !== po) {
+      notes.push(`Portal: ${inv.name || c.name} ab ${po ? "OUT OF STOCK" : "IN STOCK"}`);
+      if (!po && (!inv.tracking || Number(inv.units) <= 0)) declareNeed.push(inv.name || c.name);
+    }
+    await env.DB.prepare("UPDATE inventory SET portal_oos=?, portal_seen=1, name=CASE WHEN name='' OR name IS NULL THEN ? ELSE name END WHERE product_id=?").bind(po, c.name, c.product_id).run();
+  }
+  if (notes.length) await env.DB.batch(notes.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "info", t)));
+  if (declareNeed.length) {
+    const body = declareNeed.map((n) => `• ${n}`).join("\n");
+    await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "error", `⚠️ Portal IN STOCK par app me stock declare nahi: ${declareNeed.length}`).run();
+    await pushNotify(env, "alert", `⚠️ Stock declare karo (${declareNeed.length})`, body);
+    await sendMail(env, `[Anagh Stock] Portal in-stock par app me declare nahi (${declareNeed.length})`, emailHtml({ kind: "error", code: "DECLARE", message: body, env, now }), "alert");
+  }
 }
 function invStatus(units, threshold) {
   if (units <= 0) return "oos";
@@ -486,7 +553,9 @@ async function fetchOrderLines(env, id) {
   if (Array.isArray(pp) && pp.length) {
     for (const p of pp) {
       if (!p || p.id == null) continue;
-      lines.push({ product_id: String(p.id), name: nameById[String(p.id)] || p.key || p.product_name || "", qty: Number(p.quantity) || Number(p.pack_size) || 1 });
+      // asli pcs = pack_size × quantity (packet count × packets-per-order)
+      const pcs = (Number(p.pack_size) || 1) * (Number(p.quantity) || 1);
+      lines.push({ product_id: String(p.id), name: nameById[String(p.id)] || p.key || p.product_name || "", qty: pcs });
     }
   } else {
     for (const c of cart) if (c && c.product_id != null) lines.push({ product_id: String(c.product_id), name: c.name || "", qty: Number(c.quantity) || 1 });
@@ -545,6 +614,8 @@ async function checkScheduledOOS(env) {
   for (const inv of due) {
     await env.DB.prepare("UPDATE inventory SET units=0, status='oos', oos_at=NULL, updated_at=? WHERE product_id=?").bind(now, inv.product_id).run();
     trans.push({ ...inv, before: inv.units, after: 0, to: "oos" });
+    // scheduled OOS = explicit intent, portal par hamesha mark karo
+    await updateProductOOS(env, inv.product_id, true).catch(() => {});
   }
   if (trans.length) await alertInventory(env, trans);
 }
@@ -554,34 +625,39 @@ async function alertInventory(env, transitions) {
   const now = Date.now();
   const oos = transitions.filter((t) => t.to === "oos");
   const low = transitions.filter((t) => t.to === "low");
-  const stmts = transitions.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
-    .bind(now, "error", `${t.to === "oos" ? "⛔ OUT OF STOCK" : "⚠️ Low stock"}: ${t.name || t.sku || t.product_id} (${t.after} bache)`));
-  await env.DB.batch(stmts);
-  const title = oos.length
+  await env.DB.batch(transitions.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
+    .bind(now, "error", `${t.to === "oos" ? "⛔ OUT OF STOCK" : "⚠️ Low stock"}: ${t.name || t.sku || t.product_id} (${t.after} bache)`)));
+  // Phone push: dono ke liye turant (crossing pe hi aata hai, har order pe nahi)
+  const pTitle = oos.length
     ? `⛔ ${oos.length > 1 ? oos.length + " products" : (oos[0].name || oos[0].sku)} OUT OF STOCK`
     : `⚠️ Low stock: ${low.length > 1 ? low.length + " products" : (low[0].name || low[0].sku)}`;
-  const body = transitions.slice(0, 6).map((t) => `${t.to === "oos" ? "⛔" : "⚠️"} ${t.name || t.sku}: ${t.after} units bache`).join("\n");
-  await pushNotify(env, "alert", title, body);
-  await sendMail(env, `[Anagh Stock] ${title}`, emailHtml({ kind: "error", code: "STOCK", message: body, env, now }), "alert");
+  await pushNotify(env, "alert", pTitle, transitions.slice(0, 6).map((t) => `${t.to === "oos" ? "⛔" : "⚠️"} ${t.name || t.sku}: ${t.after}`).join("\n"));
+  // Mail: OOS turant; Low ko digest (din me 2-3 baar) pe chhodo
+  if (oos.length) {
+    const body = oos.map((t) => `⛔ ${t.name || t.sku}: ${t.after} bache`).join("\n");
+    await sendMail(env, `[Anagh Stock] ${pTitle}`, emailHtml({ kind: "error", code: "OOS", message: body, env, now }), "alert");
+  }
   await setSetting(env, "stock_alert", JSON.stringify({ ts: now, oos: oos.map((t) => t.name || t.sku), low: low.map((t) => t.name || t.sku) }));
-  for (const t of oos) if (t.auto_oos) await markOOSOnPortal(env, t).catch(() => {});
+  // Auto-sync ON ho to portal par bhi OOS mark karo (glitch-guard: ye sirf real order-decrement se aata hai)
+  for (const t of oos) if (t.auto_oos) await updateProductOOS(env, t.product_id, true).catch(() => {});
+}
+// Low-stock DIGEST — din me 2-3 baar (10/15/20 IST), har order pe nahi
+async function maybeSendLowDigest(env) {
+  await ensureInventory(env);
+  const istH = Number(new Date(Date.now() + 5.5 * 3600000).getUTCHours());
+  const windows = [10, 15, 20];
+  if (!windows.includes(istH)) return;
+  const dayKey = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10) + "-" + istH;
+  if ((await getSetting(env, "low_digest_sent")) === dayKey) return;
+  const low = (await env.DB.prepare("SELECT * FROM inventory WHERE tracking=1 AND status IN('low','oos') ORDER BY status,name").all()).results;
+  await setSetting(env, "low_digest_sent", dayKey);
+  if (!low.length) return;
+  const body = low.map((r) => `${r.status === "oos" ? "⛔" : "⚠️"} ${r.name || r.sku}: ${r.units} bache (alert <= ${r.threshold})`).join("\n");
+  await sendMail(env, `[Anagh Stock] Stock digest — ${low.length} product dhyaan maangte hain`, emailHtml({ kind: "error", code: "DIGEST", message: body, env, now: Date.now() }), "alert");
 }
 // Portal par OOS mark (gated: endpoint capture hone tak sirf event; capture ke baad real)
 async function markOOSOnPortal(env, product) {
-  const cfg = JSON.parse((await getSetting(env, "OOS_ENDPOINT")) || "null");
-  if (!cfg || !cfg.path) {
-    await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
-      .bind(Date.now(), "info", `Auto-OOS ready — portal endpoint abhi set nahi. ${product.name || product.sku} ko portal par manually OOS kar dijiye.`).run();
-    return { ok: false, reason: "endpoint-not-set" };
-  }
-  const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
-  const base = env.GW_BASE || "https://gateway.kirana.club";
-  const body = JSON.stringify(cfg.template || {}).replace(/__PID__/g, product.product_id).replace(/__SKU__/g, product.sku || "");
-  const res = await fetch(base + cfg.path, { method: cfg.method || "POST", headers: { ...GW_HEADERS, cookie }, body }).catch(() => null);
-  const ok = !!(res && res.ok);
-  await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
-    .bind(Date.now(), ok ? "info" : "error", `${ok ? "✅ Portal par OOS mark hua" : "❌ Portal OOS fail hua"}: ${product.name || product.sku}`).run();
-  return { ok };
+  return updateProductOOS(env, product.product_id, true);
 }
 // Poora catalog ek call me (seed ke liye best) — get_products
 async function fetchCatalog(env) {
@@ -692,13 +768,20 @@ async function fetchOrderExtra(env, id) {
   const pp = od.bill_breakup && od.bill_breakup.products_pricing;
   const products = Array.isArray(pp)
     ? pp.filter((p) => p && (p.product_name || p.key)).map((p) => {
-        const qty = p.quantity ?? p.pack_size ?? null;
+        const pcs = (Number(p.pack_size) || 1) * (Number(p.quantity) || 1);
         const en = nameById[String(p.id)];
-        const name = en ? `${en}${qty ? " × " + qty : ""}` : p.key || p.product_name || "";
-        return { name, qty, price: num(p.total_value) ?? num(p.offered_value) ?? num(p.value) };
+        const base = en || p.product_name || p.key || "";
+        const unit = num(p.offered_value);
+        const total = num(p.total_value) ?? num(p.value);
+        return { name: base, pcs, unit, total, price: total };
       })
     : [];
-  return { items: d.total_items, amountStr: d.total_amount_string, invoice: d.delivery_invoice, label: d.printing_label, tracking: d.tracking_link, note: d.note, products };
+  // summary lines (delivery, discount, total) — English names
+  const tp = od.bill_breakup && od.bill_breakup.total_pricing;
+  const summary = Array.isArray(tp)
+    ? tp.filter((r) => r && !r.is_internal).map((r) => ({ label: r.name || r.key || "", value: typeof r.value === "string" ? r.value.replace(/[̀-̶ͯ]/g, "") : r.value, num: num(r.total_value) }))
+    : [];
+  return { items: d.total_items, amountStr: d.total_amount_string, invoice: d.delivery_invoice, label: d.printing_label, tracking: d.tracking_link, note: d.note, products, summary, grandTotal: d.total_amount_string };
 }
 
 function niceStatus(s) {
@@ -886,75 +969,116 @@ async function loginVerify(env, email, code) {
   return { ok: true, working: !!test.ok };
 }
 
-// AI assistant — humare apne data se jawab (free, reliable)
+// placed_at string ("Nov 19 at 8:11pm") → us din ka UTC-midnight (sirf date compare ke liye)
+function placedTs(s, nowTs) {
+  if (!s) return null;
+  const m = String(s).toLowerCase().match(/([a-z]{3})\s+(\d{1,2})/);
+  if (!m || MON[m[1]] == null) return null;
+  const mon = MON[m[1]], day = Number(m[2]);
+  const istNow = new Date(nowTs + 5.5 * 3600000);
+  let year = istNow.getUTCFullYear();
+  if (mon > istNow.getUTCMonth()) year -= 1; // Dec jab abhi Jan → pichhla saal
+  return Date.UTC(year, mon, day);
+}
+function istDay(ts) { const d = new Date(ts + 5.5 * 3600000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
+
+// AI assistant — query engine (free, exact, data app me hi rehta hai)
 async function askBot(env, q) {
   const raw = String(q || "").trim();
   const text = raw.toLowerCase().replace(/[?.!,]/g, " ").replace(/\s+/g, " ");
-  if (!text) return "Poochhiye — jaise \"kya low stock hai\", \"kaunse order NDR hue\", \"aaj kitni sale\", \"top product kaunsa\".";
+  if (!text) return "Poochhiye — jaise \"kal kitne orders aaye\", \"in-transit ki total value\", \"Meat Masala ka stock\", \"aaj ki sale\".";
   const d = await loadDashboard(env);
+  const now = d.now || Date.now();
   const counts = d.latest?.counts || {};
   const metrics = d.latest?.metrics || {};
   const orders = d.orders || [];
   const ins = d.insights?.items || [];
   const inv = (d.inventory?.rows || []);
-  const rupee = (v) => (v != null ? "₹" + Number(v).toLocaleString("en-IN") : "–");
-  const byStatus = (re) => orders.filter((o) => re.test((o.status || "").toLowerCase()));
-  const listOrders = (arr) => arr.slice(0, 12).map((o) => `#${o.id}${o.customer ? " · " + o.customer : ""}${o.amount != null ? " · " + rupee(o.amount) : ""}`).join("\n") || "—";
+  const rupee = (v) => "₹" + Math.round(Number(v) || 0).toLocaleString("en-IN");
   const has = (...w) => w.some((x) => text.includes(x));
+  const DAY = 86400000;
 
-  // --- STOCK / inventory (apne app ka stock) ---
-  if (has("low stock", "kam stock", "khatam hone", "kam hai", "restock", "reorder")) {
+  // ---------- STOCK ----------
+  if (has("low stock", "kam stock", "restock", "reorder", "khatam hone")) {
     const low = inv.filter((r) => r.tracking && (r.status === "low" || r.status === "oos"));
-    return low.length ? `⚠️ Dhyaan dene wale (${low.length}):\n` + low.map((r) => `${r.status === "oos" ? "⛔" : "⚠️"} ${r.name || r.sku}: ${r.units} units bache`).join("\n")
-      : "✅ Koi tracked product low ya out of stock nahi.";
+    return low.length ? `⚠️ Dhyaan maangte hain (${low.length}):\n` + low.map((r) => `${r.status === "oos" ? "⛔" : "⚠️"} ${r.name || r.sku}: ${r.units} bache`).join("\n") : "✅ Koi tracked product low/OOS nahi.";
   }
-  if (has("out of stock", "oos", "stock khatam", "khatam ho") || (has("stock") && has("kya", "konsa", "kaunsa", "which"))) {
+  if (has("out of stock", "oos", "stock khatam")) {
     const o = inv.filter((r) => r.tracking && r.status === "oos");
-    const insOos = ins.filter((p) => p.oos);
+    const po = inv.filter((r) => Number(r.portal_oos) === 1);
     let out = o.length ? `⛔ App me OOS:\n` + o.map((r) => `• ${r.name || r.sku}`).join("\n") : "";
-    if (insOos.length) out += (out ? "\n\n" : "") + `Portal insights me OOS:\n` + insOos.map((p) => `• ${p.name}`).join("\n");
+    if (po.length) out += (out ? "\n\n" : "") + `Portal par OOS:\n` + po.map((r) => `• ${r.name || r.sku}`).join("\n");
     return out || "✅ Kuch bhi out of stock nahi.";
   }
-  if (has("stock") || has("inventory", "kitni unit", "kitne unit", "kitna bacha")) {
-    const tracked = inv.filter((r) => r.tracking);
-    if (tracked.length) return `📦 Aapka stock:\n` + tracked.slice(0, 15).map((r) => `${r.status === "oos" ? "⛔" : r.status === "low" ? "⚠️" : "✅"} ${r.name || r.sku}: ${r.units}`).join("\n");
-    return "Abhi kisi product ka stock track nahi ho raha. Stock page par units set kijiye, phir order aane par automatic ghatega.";
+
+  // ---------- Date range ----------
+  const t0 = istDay(now);
+  let range = null, rangeLabel = "";
+  if (has("aaj", "today")) { range = [t0, t0]; rangeLabel = "Aaj"; }
+  else if (has("parso", "day before")) { range = [t0 - 2 * DAY, t0 - 2 * DAY]; rangeLabel = "Parso"; }
+  else if (has("kal", "yesterday")) { range = [t0 - DAY, t0 - DAY]; rangeLabel = "Kal"; }
+  else if (has("is hafte", "this week", "hafte", "7 din", "week", "saat din")) { range = [t0 - 6 * DAY, t0]; rangeLabel = "Pichhle 7 din"; }
+  else { const m = text.match(/(?:last|pichhle|pichle)\s+(\d{1,2})\s*(?:din|days)/); if (m) { const n = Number(m[1]); range = [t0 - (n - 1) * DAY, t0]; rangeLabel = `Pichhle ${n} din`; } }
+
+  // ---------- Status filter ----------
+  let stRe = null, stName = "";
+  if (/\bndr\b/.test(text)) { stRe = /ndr/; stName = "NDR"; }
+  else if (/\brto\b/.test(text)) { stRe = /rto/; stName = "RTO"; }
+  else if (has("cancel")) { stRe = /cancel/; stName = "Cancelled"; }
+  else if (has("transit", "raaste", "shipment")) { stRe = /transit|shipment/; stName = "In Transit"; }
+  else if (has("deliver", "pahunch")) { stRe = /deliver/; stName = "Delivered"; }
+  else if (has("confirm", "naya order", "naye order", "new order")) { stRe = /confirm/; stName = "Confirmed"; }
+
+  // ---------- Metric ----------
+  const wantValue = has("value", "amount", "total value", "kitne ka", "kitna", "kitne ki", "worth", "rupay", "rupee", "paisa", "revenue", "kamai");
+  const wantAvg = has("average", "avg", "aausat", "ausat");
+  const wantMax = has("sabse bada", "sabse mehenga", "largest", "biggest", "max", "highest");
+  const wantMin = has("sabse chhota", "sabse sasta", "smallest", "min", "lowest");
+  const wantList = has("list", "dikhao", "dikha", "kaunse", "konse", "which", "naam");
+
+  // ---------- Order query (date aur/ya status) ----------
+  if (range || stRe || wantValue || wantAvg || wantMax || wantMin) {
+    let f = orders;
+    if (stRe) f = f.filter((o) => stRe.test((o.status || "").toLowerCase()));
+    if (range) f = f.filter((o) => { const dd = placedTs(o.placed_at, now); return dd != null && dd >= range[0] && dd <= range[1]; });
+    if (has("cod")) f = f.filter((o) => /cod/i.test(o.payment || ""));
+    if (has("prepaid", "paid", "online")) f = f.filter((o) => /paid|prepaid/i.test(o.payment || ""));
+    const amts = f.map((o) => Number(o.amount) || 0);
+    const total = amts.reduce((a, b) => a + b, 0);
+    const label = [rangeLabel, stName].filter(Boolean).join(" · ") || "Filter";
+    if (wantMax && f.length) { const o = f.reduce((a, b) => ((Number(b.amount) || 0) > (Number(a.amount) || 0) ? b : a)); return `${label} — sabse bada: #${o.id} · ${rupee(o.amount)}${o.customer ? " · " + o.customer : ""}`; }
+    if (wantMin && f.length) { const o = f.reduce((a, b) => ((Number(b.amount) || 0) < (Number(a.amount) || 0) ? b : a)); return `${label} — sabse chhota: #${o.id} · ${rupee(o.amount)}${o.customer ? " · " + o.customer : ""}`; }
+    if (wantAvg) return `${label}: ${f.length} orders, average ${rupee(f.length ? total / f.length : 0)}`;
+    let head = `${label}: ${f.length} order${f.length === 1 ? "" : "s"} · total ${rupee(total)}`;
+    if (wantList || (f.length && f.length <= 15)) head += "\n" + f.slice(0, 15).map((o) => `#${o.id}${o.customer ? " · " + o.customer : ""} · ${rupee(o.amount)}`).join("\n");
+    return head;
   }
 
-  // --- Orders by status ---
-  if (/\bndr\b/.test(text)) { const a = byStatus(/ndr/); return `🔴 NDR orders: ${a.length}\n${listOrders(a)}`; }
-  if (/\brto\b/.test(text)) { const a = byStatus(/rto/); return `🔴 RTO orders: ${a.length}\n${listOrders(a)}`; }
-  if (has("cancel")) { const a = byStatus(/cancel/); return `⚪ Cancelled: ${a.length}\n${listOrders(a)}`; }
-  if (has("transit", "raaste", "shipment", "nikla")) { const a = byStatus(/transit|shipment/); return `🚚 In Transit: ${a.length}\n${listOrders(a)}`; }
-  if (has("deliver", "pahunch")) { const a = byStatus(/deliver/); return `✅ Delivered (list me): ${a.length}\n${listOrders(a)}`; }
-  if (has("confirm", "naya order", "naye order", "new order")) { const a = byStatus(/confirm/); return `🆕 Confirmed/naye: ${a.length}\n${listOrders(a)}`; }
-
-  // --- Products / sales ---
+  // ---------- Top products ----------
   if (has("top", "best", "sabse") && has("product", "bik", "sell", "chal")) {
-    return ins.length ? `📊 Top products (units, 30 din):\n` + ins.slice(0, 6).map((p) => `${p.rank}. ${p.name} — ${p.units} units, ${p.orders} orders${p.oos ? " ⛔OOS" : ""}`).join("\n")
-      : "Insights abhi load nahi hua.";
+    return ins.length ? `📊 Top products (30 din):\n` + ins.slice(0, 6).map((p) => `${p.rank}. ${p.name} — ${p.units} units, ${p.orders} orders${p.oos ? " ⛔" : ""}`).join("\n") : "Insights abhi load nahi hua.";
   }
-  if (has("aaj", "today")) return `Aaj: Sales ${rupee(metrics["Today's Sales"])}, Orders ${metrics["Today's orders"] ?? "–"}`;
-  if (has("kal", "yesterday")) return `Kal: Sales ${rupee(metrics["Yesterday's Sales"])}, Orders ${metrics["Yesterday's orders"] ?? "–"}`;
-  if (has("sale", "revenue", "kamai", "bikri", "total", "mahine", "month")) return Object.entries(metrics).map(([k, v]) => `${k}: ${typeof v === "number" && /sale|value/i.test(k) ? rupee(v) : v}`).join("\n") || "Abhi data load nahi hua.";
-  if (has("kitne order", "order kitne", "status", "summary", "kitne")) return Object.entries(counts).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}: ${n}`).join("\n") || "Abhi data nahi.";
 
-  // --- Specific product name lookup (bot ki galti kam karne ke liye) ---
-  const words = text.split(" ").filter((w) => w.length > 3 && !["order","stock","kitna","kitne","konsa","kaunsa","product","hai","mera","hua","wala"].includes(w));
+  // ---------- Specific product (stock + sales) ----------
+  const stop = ["order","orders","stock","kitna","kitne","konsa","kaunsa","kaunse","product","hai","mera","hua","wala","kya","total","value"];
+  const words = text.split(" ").filter((w) => w.length > 3 && !stop.includes(w));
   if (words.length) {
-    const hit = inv.find((r) => words.some((w) => (r.name || "").toLowerCase().includes(w))) ||
-                ins.find((p) => words.some((w) => (p.name || "").toLowerCase().includes(w)));
+    const hit = inv.find((r) => words.some((w) => (r.name || "").toLowerCase().includes(w))) || ins.find((p) => words.some((w) => (p.name || "").toLowerCase().includes(w)));
     if (hit) {
       const name = hit.name || hit.sku;
-      const stock = inv.find((r) => (r.name || "") === hit.name);
-      const sale = ins.find((p) => (p.name || "") === hit.name);
+      const st = inv.find((r) => (r.name || "").toLowerCase() === (name || "").toLowerCase());
+      const sale = ins.find((p) => (p.name || "").toLowerCase() === (name || "").toLowerCase());
       const bits = [`📦 ${name}`];
-      if (stock && stock.tracking) bits.push(`Stock: ${stock.units} units (${stock.status})`);
-      if (sale) bits.push(`30 din: ${sale.units} units, ${sale.orders} orders${sale.oos ? " ⛔OOS" : ""}`);
+      if (st) { bits.push(`App stock: ${st.units}${st.per_bundle ? ` (${Math.floor(st.units / st.per_bundle)} bundle + ${st.units % st.per_bundle} pcs)` : ""} — ${st.tracking ? st.status : "track off"}`); bits.push(`Portal: ${Number(st.portal_oos) ? "OUT OF STOCK" : "In stock"}`); }
+      if (sale) bits.push(`30 din: ${sale.units} units, ${sale.orders} orders`);
       return bits.join("\n");
     }
   }
-  return "Main aapke live data se bata sakta hoon:\n• Stock — kya low/out of stock hai, kisi product ka stock\n• Orders — NDR / RTO / Cancelled / In Transit / Delivered / naye\n• Sale — aaj, kal, mahine ki\n• Top products\n\nJaise: \"kya low stock hai\", \"Meat Masala ka stock\", \"kaunse NDR hue\", \"aaj kitni sale\".";
+
+  // ---------- Fallback: sale/summary ----------
+  if (has("sale", "bikri", "mahine", "month")) return Object.entries(metrics).map(([k, v]) => `${k}: ${typeof v === "number" && /sale|value/i.test(k) ? rupee(v) : v}`).join("\n") || "Abhi data nahi.";
+  if (has("summary", "status", "kitne order", "saare order")) return Object.entries(counts).filter(([s]) => !/all/i.test(s)).map(([s, n]) => `${s}: ${n}`).join("\n") || "Abhi data nahi.";
+  return "Main exact jawab de sakta hoon:\n• \"kal kitne orders aaye\", \"parso ki sale\", \"is hafte kitne order\"\n• \"in-transit ki total value\", \"NDR orders\", \"sabse bada order\"\n• \"Meat Masala ka stock\", \"kya low stock hai\", \"top product\"";
 }
 
 async function gwPost(env, path, body) {
@@ -1051,6 +1175,8 @@ async function cronTick(env) {
   await fetchInsights(env).catch(() => {});
   await fetchRatings(env).catch(() => {});
   await checkScheduledOOS(env).catch(() => {});
+  await syncPortalStatus(env).catch(() => {});
+  await maybeSendLowDigest(env).catch(() => {});
   await dispatch(env);
 }
 

@@ -1,10 +1,12 @@
 import { esc, fmtVal, fmtTime, fmtDay, dayKey, ago, statusTone, describe, isMoney } from "./util.js";
 
 const CSS = `
-:root{--bg:#F6F3EE;--card:#fff;--ink:#1E1914;--muted:#7B7168;--line:#EAE3D9;--accent:#C4623A;--accent-ink:#fff;
---good:#1E7F55;--good-bg:#E5F3EB;--bad:#BF3A2B;--bad-bg:#FBE8E5;--warn:#A86A12;--warn-bg:#FCF1DE;--info:#3756C8;--info-bg:#E8EDFC;
---new:#6A45BE;--new-bg:#EFEAFB;--mute:#6B7280;--mute-bg:#F0F0EF;--r:14px}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+:root{--bg:#FBF7F0;--card:#FFFDFA;--ink:#2D2016;--muted:#8A7B6B;--line:#ECE2D4;--accent:#C4623A;--accent-dark:#A64E2C;--gold:#B89340;--accent-ink:#fff;
+--good:#1E7F55;--good-bg:#E6F2EB;--bad:#BF3A2B;--bad-bg:#FBE8E4;--warn:#A86A12;--warn-bg:#FBF0DB;--info:#3756C8;--info-bg:#E8EDFC;
+--new:#6A45BE;--new-bg:#EFEAFB;--mute:#8A7B6B;--mute-bg:#F2ECE2;--r:14px;--serif:'Playfair Display',Georgia,serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 'DM Sans',ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+h1,h2,h3,.title h1,.kpi .v{font-family:var(--serif)}
 .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
 header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .mark{width:40px;height:40px;border-radius:11px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;letter-spacing:.5px}
@@ -71,6 +73,14 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .drow .k{color:var(--muted)}.drow .v{text-align:right;font-weight:600;max-width:65%}
 .addr{background:var(--bg);border-radius:10px;padding:12px;font-size:14px;line-height:1.5;margin:10px 0}
 .lnk{display:inline-block;margin:4px 8px 0 0;padding:7px 12px;border-radius:9px;background:var(--ink);color:#fff;text-decoration:none;font-size:13px;font-weight:600}
+.bkhead{font-size:12px;font-weight:700;color:var(--muted);margin:16px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+.bktab{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.bkrow{display:flex;justify-content:space-between;gap:12px;padding:11px 13px;border-bottom:1px solid var(--line);font-size:14px}
+.bkrow:last-child{border-bottom:0}
+.bknm{color:var(--ink);font-weight:600}.bkq{display:block;color:var(--muted);font-size:12px;font-weight:500;margin-top:2px}
+.bkv{text-align:right;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bkrow.sum{background:var(--bg)}.bkrow.sum .bknm{font-weight:500;color:var(--muted)}.bkrow.sum .bkv{font-weight:600}
+.bkrow.tot{background:var(--mute-bg)}.bkrow.tot .bknm,.bkrow.tot .bkv{font-weight:800;font-size:15px}
 .toast{position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-16px);opacity:0;visibility:hidden;pointer-events:none;transition:transform .35s ease,opacity .3s ease;z-index:50;
 background:#1E1914;color:#fff;border-radius:14px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25);width:min(92vw,420px)}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible;pointer-events:auto}.toast b{display:block;font-size:15px;margin-bottom:3px}.toast span{font-size:13.5px;opacity:.85;white-space:pre-line}
@@ -104,7 +114,22 @@ details.card summary::-webkit-details-marker{display:none}
 .cl a{color:var(--info);font-weight:600;text-decoration:none;white-space:nowrap}
 footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:600px){.wrap{padding:16px 12px 40px}.kpis{grid-template-columns:1fr 1fr;gap:10px}.card.kpi{padding:13px}.kpi .v{font-size:21px;margin-top:3px}.kpi .l{font-size:11.5px}.hide-sm{display:none}.meta{gap:4px 12px;margin:10px 0 14px}.chips{gap:6px;margin-bottom:16px}.chip{padding:6px 10px;font-size:12.5px}.chip b{font-size:14px}}
-.topbar{position:sticky;top:0;z-index:40;background:rgba(246,243,238,.92);backdrop-filter:blur(8px);display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.topbar{position:sticky;top:0;z-index:40;background:rgba(251,247,240,.94);backdrop-filter:blur(8px);display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.topttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bell{position:relative;background:none;border:0;font-size:19px;cursor:pointer;padding:4px 6px;flex-shrink:0;line-height:1}
+.nbadge{position:absolute;top:-2px;right:-2px;background:var(--bad);color:#fff;font-size:9.5px;font-weight:800;min-width:15px;height:15px;border-radius:999px;display:flex;align-items:center;justify-content:center;padding:0 3px;font-family:'DM Sans',sans-serif}
+.langtog{flex-shrink:0}.pill{flex-shrink:0}
+.notifpanel{display:none;position:fixed;top:58px;right:12px;z-index:60;width:min(360px,calc(100vw - 24px));max-height:70vh;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 50px rgba(45,32,22,.22);overflow:hidden;flex-direction:column}
+.notifpanel.show{display:flex}
+.nphead{display:flex;align-items:center;justify-content:space-between;padding:12px 15px;border-bottom:1px solid var(--line)}
+.npx{background:none;border:0;font-size:22px;color:var(--muted);cursor:pointer;padding:0 3px}
+.nplist{overflow:auto}
+.nprow{padding:11px 15px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.nprow:last-child{border-bottom:0}
+.nprow.unseen{background:#FBF4EE}
+.nprow.error .npt{color:var(--bad)}
+.npt{font-size:13px;line-height:1.4}.npd{font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+@media(max-width:600px){.topttl span{display:none}.pilltext{display:none}.pill{padding:6px}.pill i{margin:0}}
 .burger{background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink);padding:3px 7px;border-radius:8px;line-height:1}
 .topttl{font-weight:700;font-size:15px;line-height:1}.topttl span{display:block;color:var(--muted);font-size:11.5px;font-weight:500}
 .langtog{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12px;font-weight:700;background:#fff}
@@ -156,6 +181,10 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
 .sched{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);font-weight:700}
 .sched input{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.sbadge.warn{background:var(--warn-bg);color:var(--warn)}
+.tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--mute-bg);color:var(--muted);font-size:10px;font-weight:800;font-style:italic;cursor:pointer;vertical-align:middle;margin-left:3px}
+.bundlerow{margin-top:7px}.bundleline{font-size:12px;color:var(--accent-dark);font-weight:700;background:var(--mute-bg);padding:3px 9px;border-radius:7px;display:inline-block}
+.declare{margin:8px 0 2px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:7px 10px;border-radius:9px;line-height:1.4}
 @media(max-width:600px){.sctrl input{width:30vw;max-width:110px}}
 .up{color:var(--good)}.down{color:var(--bad)}
 .rsum{display:flex;align-items:center;gap:16px;margin-bottom:8px}.rsum .big{font-size:40px;font-weight:800;line-height:1}
@@ -317,12 +346,22 @@ function toggleChat(){var p=document.getElementById("chatpanel"),f=document.getE
  if(open)setTimeout(function(){var i=document.getElementById("chatin");if(i)i.focus();},120);}
 try{setTimeout(function(){var t=document.getElementById("fabtip"),p=document.getElementById("chatpanel");
  if(t&&p&&!p.classList.contains("show")){t.classList.add("show");setTimeout(function(){t.classList.remove("show");},5500);}},1400);}catch(_){}
+function toggleNotif(){var p=document.getElementById("notifpanel");var open=!p.classList.contains("show");p.classList.toggle("show",open);
+ if(open){var last=p.dataset.last;var b=document.querySelector(".nbadge");if(b)b.remove();
+  p.querySelectorAll(".nprow.unseen").forEach(function(r){r.classList.remove("unseen");});
+  fetch("/api/notif/seen",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:Number(last)||0})}).catch(function(){});}}
 function sRow(b){return b.closest(".srow");}
+function tipShow(m){toast("ℹ️ Info",m,false);}
 async function saveStock(btn){var r=sRow(btn),o=btn.textContent;btn.textContent="…";
- var body={product_id:r.dataset.pid,units:+r.querySelector(".in-units").value,threshold:+r.querySelector(".in-thr").value,min_qty:+r.querySelector(".in-min").value,tracking:r.querySelector(".in-track").checked,auto_oos:r.querySelector(".in-auto").checked};
- try{await fetch("/api/stock/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});toast("✅ Stock save ho gaya","",false);setTimeout(function(){location.reload();},650);}catch(e){btn.textContent=o;}}
-async function markOOSNow(btn){var r=sRow(btn);if(!confirm("Is product ko ABHI out of stock mark karein?"))return;
- await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:"now"})});toast("⛔ Out of stock mark","",false);setTimeout(function(){location.reload();},650);}
+ var body={product_id:r.dataset.pid,units:+r.querySelector(".in-units").value,per_bundle:+r.querySelector(".in-pb").value,threshold:+r.querySelector(".in-thr").value,min_qty:+r.querySelector(".in-min").value,tracking:r.querySelector(".in-track").checked,auto_oos:r.querySelector(".in-auto").checked};
+ try{var j=await (await fetch("/api/stock/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)})).json();
+  toast("✅ Stock save"+(j&&j.portal&&j.portal.ok?" + portal update":""),"",false);setTimeout(function(){location.reload();},700);}catch(e){btn.textContent=o;}}
+async function markOOSNow(btn){var r=sRow(btn);if(!confirm("Is product ko ABHI portal par OUT OF STOCK karein?"))return;
+ var j=await (await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:"now"})})).json();
+ toast(j&&j.portal&&j.portal.ok?"⛔ Portal par OOS ho gaya":"⛔ OOS mark (portal update check karein)","",false);setTimeout(function(){location.reload();},750);}
+async function markInStock(btn){var r=sRow(btn);if(!confirm("Is product ko portal par wapas IN STOCK karein?"))return;
+ var j=await (await fetch("/api/stock/instock",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid})})).json();
+ toast(j&&j.portal&&j.portal.ok?"✅ Portal par IN STOCK ho gaya":"IN STOCK mark (check karein)","",false);setTimeout(function(){location.reload();},750);}
 async function scheduleOOS(btn){var r=sRow(btn),v=r.querySelector(".in-when").value;if(!v){alert("Pehle date aur time chuniye");return;}
  await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:new Date(v).getTime()})});toast("⏰ OOS schedule set","",false);}
 async function discoverStock(btn){var o=btn.textContent;btn.textContent="Laa raha hoon…";
@@ -345,13 +384,15 @@ async function openOrder(id){
   if(ex.tracking)links+='<a class="lnk" href="'+esc(ex.tracking)+'" target="_blank">Track</a>';
   let prods="";
   if(ex.products&&ex.products.length){
-    prods='<div style="font-size:12px;font-weight:700;color:#7B7168;margin:14px 0 2px;text-transform:uppercase;letter-spacing:.5px">Products ('+ex.products.length+')</div>'
-      +ex.products.map(p=>'<div class="drow"><span class="k" style="color:#1E1914;max-width:72%">'+esc(p.name)+'</span><span class="v">'+(p.price!=null?rupee(p.price):"")+'</span></div>').join("");
+    prods='<div class="bkhead">Order breakup</div><div class="bktab">'
+      +ex.products.map(p=>'<div class="bkrow"><div class="bknm">'+esc(p.name)+(p.pcs?'<span class="bkq">× '+p.pcs+' pcs'+(p.unit!=null?' @ '+rupee(p.unit):'')+'</span>':'')+'</div><div class="bkv">'+(p.total!=null?rupee(p.total):(p.price!=null?rupee(p.price):""))+'</div></div>').join("")
+      +(ex.summary&&ex.summary.length?ex.summary.map(s=>'<div class="bkrow sum"><div class="bknm">'+esc(s.label||"")+'</div><div class="bkv">'+esc(s.value!=null?s.value:(s.num!=null?rupee(s.num):""))+'</div></div>').join(""):"")
+      +'<div class="bkrow tot"><div class="bknm">Total</div><div class="bkv">'+esc(ex.grandTotal||rupee(o.amount))+'</div></div>'
+      +'</div>';
   }
   sh.innerHTML='<button class="x" onclick="closeOrder()">&times;</button>'
     +'<h3>#'+esc(o.id)+'</h3><div class="sub" style="margin-bottom:12px">'+esc(d.customer||o.customer||"")+'</div>'
-    +row("Status",o.status)+row("Amount",rupee(o.amount))+(d.paid?row("Paid",rupee(d.paid)):"")
-    +row("Payment",o.payment)+(ex.products&&ex.products.length?"":row("Items",ex.items))+row("Courier",d.courier)+row("Order date",fmtISO(d.date))
+    +row("Status",o.status)+row("Payment",o.payment)+row("Courier",d.courier)+row("Order date",fmtISO(d.date))
     +prods
     +(d.note?row("Note",d.note):"")
     +(addr?'<div style="font-size:12px;font-weight:700;color:#7B7168;margin:14px 0 2px;text-transform:uppercase;letter-spacing:.5px">Delivery address</div><div class="addr">'+addr+'</div>':'')
@@ -453,29 +494,41 @@ function insightsView(d, t) {
   return `<div class="ihead">${t("topByUnits")}</div>${bars}<div class="idiv"></div><div class="ihead">${t("allProducts")}</div>${list}`;
 }
 
+function tip(msg) { return `<span class="tip" onclick="tipShow('${esc(msg).replace(/'/g, "\\'")}')" title="${esc(msg)}">i</span>`; }
 function stockView(d, t) {
   const rows = (d.inventory && d.inventory.rows) || [];
-  if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke recent orders se product list ban jayegi, phir har product ki units set kar dijiye.</div>
-    <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Recent orders se products laao</button>`;
+  if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke portal catalog se poori product list aa jayegi, phir har product ki units set kar dijiye.</div>
+    <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Portal se products laao</button>`;
   const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;
-  const list = rows.map((r) => `<div class="srow ${r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}">
-    <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}</div>
+  const list = rows.map((r) => {
+    const pb = Number(r.per_bundle) || 0;
+    const bundleInfo = pb ? `<span class="bundleline">= ${Math.floor(r.units / pb)} bundle + ${r.units % pb} pcs</span>` : "";
+    const portalOos = Number(r.portal_oos) === 1;
+    const mismatch = r.tracking && ((r.status === "oos" && !portalOos) || (r.status !== "oos" && portalOos && Number(r.units) > 0));
+    const declareNeed = !portalOos && (!r.tracking || Number(r.units) <= 0);
+    return `<div class="srow ${r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}">
+    <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}
+      <span class="sbadge ${portalOos ? "oos" : "ok"}" title="Portal par status">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn" title="App aur portal alag">⚠ mismatch</span>` : ""}</div>
+    ${declareNeed ? `<div class="declare">Portal par IN STOCK hai par yahan stock declare nahi — units bhariye warna order aayega aur track nahi hoga.</div>` : ""}
     <div class="sctrl">
-      <label>Units bache<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
-      <label>Alert &lt;=<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label>
-      <label>Min order qty<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric"></label>
+      <label>Units bache (pcs) ${tip("Abhi kitne single pieces/sachet bache hain. Order aate hi apne aap ghatega.")}<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
+      <label>Pcs per bundle ${tip("1 packet/bundle me kitne pcs. Jaise 20. Bundles isi se dikhega. Khaali/0 = sirf pcs.")}<input type="number" class="in-pb" value="${pb}" min="0" inputmode="numeric"></label>
+      <label>Alert &lt;= ${tip("Units itne ya kam hote hi LOW alert jata hai.")}<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label>
+      <label>Min order qty ${tip("1 order me kitne pcs jaate hain (portal se). Sirf jaankari ke liye.")}<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric"></label>
     </div>
+    ${bundleInfo ? `<div class="bundlerow">${bundleInfo}</div>` : ""}
     <div class="srow2">
-      <label class="chk"><input type="checkbox" class="in-track" ${r.tracking ? "checked" : ""}> Track</label>
-      <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-OOS</label>
+      <label class="chk"><input type="checkbox" class="in-track" ${r.tracking ? "checked" : ""}> Track ${tip("On = is product ka stock track karo aur order par ghatao.")}</label>
+      <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-sync ${tip("On = stock 0 hote hi portal par OOS, aur stock aate hi wapas IN STOCK — apne aap.")}</label>
       <button class="btn mini" onclick="saveStock(this)">Save</button>
-      <button class="btn mini ghost" onclick="markOOSNow(this)">Mark OOS</button>
-      <label class="sched">Schedule OOS<input type="datetime-local" class="in-when"></label>
+      ${portalOos ? `<button class="btn mini ghost" onclick="markInStock(this)">Portal IN-STOCK karo</button>` : `<button class="btn mini ghost" onclick="markOOSNow(this)">Portal OOS karo</button>`}
+      <label class="sched">Schedule OOS ${tip("Is date/time par apne aap OOS ho jayega.")}<input type="datetime-local" class="in-when"></label>
       <button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button>
     </div>
-  </div>`).join("");
+  </div>`;
+  }).join("");
   return `<div class="sub" style="margin-bottom:14px">${t("stockSub")}</div>${list}
-    <button class="btn ghost" style="margin-top:6px" onclick="discoverStock(this)">↺ Recent orders se aur products laao</button>`;
+    <button class="btn ghost" style="margin-top:6px" onclick="discoverStock(this)">↺ Portal se aur products laao</button>`;
 }
 
 function stars(n) {
@@ -559,13 +612,19 @@ export function dashboardPage(d, env, lang) {
   const invAlerts = (d.inventory && d.inventory.alerts) || 0;
   const stockMenu = `<a data-sec="stock" onclick="showSec('stock')"><span class="ic">🏷️</span>${t("stock")}${invAlerts ? `<span class="mbadge">${invAlerts}</span>` : ""}</a>`;
 
+  const evs = d.events || [];
+  const unseen = evs.filter((e) => e.id > (d.notifSeenId || 0)).length;
   const body = `<div class="topbar">
     <button class="burger" onclick="toggleMenu(1)" aria-label="Menu">☰</button>
     <div class="mark" style="width:32px;height:32px;border-radius:9px;font-size:12px">KC</div>
     <div class="topttl">Kirana Club Tracker<span>${t("sub")}</span></div>
-    <div class="spacer"></div>
+    <button class="bell" onclick="toggleNotif()" aria-label="Notifications">🔔${unseen ? `<span class="nbadge">${unseen > 9 ? "9+" : unseen}</span>` : ""}</button>
     <div class="langtog"><a href="/lang?set=hi" class="${lang === "hi" ? "on" : ""}">HI</a><a href="/lang?set=en" class="${lang === "en" ? "on" : ""}">EN</a></div>
-    <span class="pill ${h.tone}"><i></i>${h.text}</span>
+    <span class="pill ${h.tone}"><i></i><span class="pilltext">${h.text}</span></span>
+  </div>
+  <div class="notifpanel" id="notifpanel" data-last="${evs[0] ? evs[0].id : 0}">
+    <div class="nphead"><b>🔔 Notifications</b><button onclick="toggleNotif()" class="npx">×</button></div>
+    <div class="nplist">${evs.slice(0, 40).map((e) => `<div class="nprow ${e.id > (d.notifSeenId || 0) ? "unseen" : ""} ${e.type}"><div class="npt">${esc(e.title)}</div><div class="npd">${fmtTime(e.ts)}</div></div>`).join("") || `<div class="empty" style="padding:20px">Abhi koi notification nahi.</div>`}</div>
   </div>
   <div class="menu" id="menu"><div class="bg" onclick="toggleMenu(0)"></div><div class="panel">
     <div class="mh"><div class="mark" style="width:30px;height:30px;border-radius:8px;font-size:11px">KC</div><b>${t("menu")}</b></div>
