@@ -491,6 +491,7 @@ async function loadDashboard(env) {
     inventory: await inventoryList(env),
     stockAlert: JSON.parse((await getSetting(env, "stock_alert")) || "null"),
     notifSeenId: Number(await getSetting(env, "notif_seen_id")) || 0,
+    suggestions: JSON.parse((await getSetting(env, "home_cards")) || "[]"),
   };
 }
 
@@ -520,6 +521,9 @@ async function updateProductOOS(env, productID, isOos) {
 // Two-way sync: portal ka is_oos padho, app me reflect karo, manual change + mismatch detect karo
 async function syncPortalStatus(env) {
   await ensureInventory(env);
+  // seller app ki suggestions bhi refresh karo (read-only dikhane ke liye)
+  const cards = await fetchHomeCards(env).catch(() => null);
+  if (cards) await setSetting(env, "home_cards", JSON.stringify(cards));
   const cat = await fetchCatalog(env).catch(() => []);
   if (!cat.length) return;
   const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
@@ -678,6 +682,17 @@ async function maybeSendLowDigest(env) {
 // Portal par OOS mark (gated: endpoint capture hone tak sirf event; capture ke baad real)
 async function markOOSOnPortal(env, product) {
   return updateProductOOS(env, product.product_id, true);
+}
+// Seller app ke "What to do next" / Grow suggestions — home API ke cards[]
+async function fetchHomeCards(env) {
+  const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+  if (!cookie) return [];
+  const base = env.GW_BASE || "https://gateway.kirana.club";
+  const res = await fetch(base + "/dlg/auth/v1/b2b/home", { method: "GET", headers: { ...GW_HEADERS, cookie } }).catch(() => null);
+  if (!res) return [];
+  const j = await res.json().catch(() => null);
+  const cards = j?.data?.cards;
+  return Array.isArray(cards) ? cards : [];
 }
 // Seller ne portal par jo set kiya (pack_size = min order qty, mrp, rate) — edit/list se
 async function fetchEditMeta(env, ids) {

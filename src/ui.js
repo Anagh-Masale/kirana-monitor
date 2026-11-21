@@ -34,6 +34,10 @@ button:active{transform:translateY(1px)}
 .kpi .v{font-size:26px;font-weight:800;letter-spacing:-.5px;margin-top:5px;font-variant-numeric:tabular-nums}
 .kpi .d{font-size:12px;margin-top:5px;font-weight:700;color:var(--muted)}
 .avgcard{border-color:var(--gold);background:linear-gradient(180deg,#FFFDF8,#FDF8EE)}.avgcard .v{color:var(--accent-dark)}
+.sugg{border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:10px;padding:11px 13px;margin-top:10px;background:var(--bg)}
+.sugg:first-of-type{margin-top:4px}
+.suggt{font-weight:700;font-size:14px;line-height:1.4}
+.suggd{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45}
 .kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--bad)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;font-size:13.5px;font-weight:600}
@@ -512,6 +516,27 @@ function insightsView(d, t) {
   return `<div class="ihead">${t("topByUnits")}</div>${bars}<div class="idiv"></div><div class="ihead">${t("allProducts")}</div>${list}`;
 }
 
+function suggView(d, lang) {
+  const cards = (d.suggestions || []).filter(Boolean);
+  if (!cards.length) return "";
+  const strOf = (card) => {
+    const out = [];
+    (function walk(o) {
+      if (o == null) return;
+      if (typeof o === "string") { const s = o.trim(); if (s.length >= 4 && !/^https?:\/\//i.test(s) && !/\.(png|jpe?g|svg|webp|gif)/i.test(s) && !/^[a-f0-9-]{16,}$/i.test(s)) out.push(s); }
+      else if (Array.isArray(o)) o.forEach(walk);
+      else if (typeof o === "object") Object.values(o).forEach(walk);
+    })(card);
+    return [...new Set(out)];
+  };
+  const items = cards.map((card) => {
+    const s = strOf(card);
+    if (!s.length) return "";
+    return `<div class="sugg"><div class="suggt">💡 ${esc(s[0])}</div>${s.slice(1, 4).map((x) => `<div class="suggd">${esc(x)}</div>`).join("")}</div>`;
+  }).filter(Boolean).join("");
+  if (!items) return "";
+  return `<section class="card" style="margin-bottom:16px"><h2>${lang === "hi" ? "Kirana ke suggestions" : "Kirana suggestions"} <small>${lang === "hi" ? "activate seller app par hi" : "act on the seller app"}</small></h2>${items}</section>`;
+}
 function tip(msg) { return `<span class="tip" onclick="tipToggle(this)">i<span class="tipbub">${esc(msg)}</span></span>`; }
 function stockView(d, t) {
   const rows = (d.inventory && d.inventory.rows) || [];
@@ -680,6 +705,7 @@ export function dashboardPage(d, env, lang) {
     </div>
     <div class="kpis">${kpis}</div>
     ${chips ? `<div class="chips">${chips}</div>` : ""}
+    ${suggView(d, lang)}
     <section class="card chart" style="margin-bottom:16px"><h2>${t("perDay")} <small>${t("last14")} · ${c.total} orders</small></h2>${c.svg}</section>
     <section class="card"><h2>${t("activity")} <small>${t("activitySub")}</small></h2>
       <ul class="tl">${tl || `<li class="empty">${t("noAct")}</li>`}</ul></section>
