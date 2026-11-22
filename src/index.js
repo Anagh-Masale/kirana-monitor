@@ -716,10 +716,16 @@ async function fetchCatalog(env) {
     prods = j?.data?.products;
   }
   if (!Array.isArray(prods)) return [];
-  return prods.filter((p) => p && p.id != null).map((p) => ({
-    product_id: String(p.id), sku: p.sku_code || "", name: p.name || p.name_label || "", is_oos: !!p.is_oos,
-    parent: p.parent_item_id != null ? String(p.parent_item_id) : (p.item_id != null ? String(p.item_id) : ""),
-  }));
+  return prods.filter((p) => p && p.id != null).map((p) => {
+    const m = p.meta || {};
+    return {
+      product_id: String(p.id), sku: p.sku_code || "", name: p.name || p.name_label || "", is_oos: !!p.is_oos,
+      parent: p.parent_item_id != null ? String(p.parent_item_id) : (p.item_id != null ? String(p.item_id) : ""),
+      // MOQ (min order, pcs) = pack_size × case_size — seedha catalog se (authoritative)
+      pack: (Number(m.pack_size) || 1) * (Number(m.case_size) || 1),
+      mrp: Number(m.mrp_number) || null,
+    };
+  });
 }
 // Product identity ke liye normalized naam (size tak) — SKU badalne par bhi same rahe
 // Catalog reconcile: SKU change par purana row MODIFY ho (settings carry), duplicate hate, delisted discontinue ho
@@ -727,7 +733,6 @@ async function reconcileCatalog(env) {
   await ensureInventory(env);
   const cat = await fetchCatalog(env).catch(() => []);
   if (!cat.length) return { merged: 0, added: 0, removed: 0 };
-  const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
   const rows = (await env.DB.prepare("SELECT * FROM inventory").all()).results;
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
   // rows ko naam-key AUR parent-key dono se index karo (purane rows me parent nahi hai)
@@ -738,7 +743,7 @@ async function reconcileCatalog(env) {
   let merged = 0, added = 0, removed = 0;
   for (const c of cat) {
     const po = c.is_oos ? 1 : 0;
-    const moq = meta[c.product_id]?.pack_size || null;
+    const moq = c.pack || null; // MOQ seedha catalog se — hamesha overwrite
     // match: pehle parent, phir naam; already-used rows chhodo
     let group = ((c.parent && byParent[c.parent]) || byName[norm(c.name)] || []).filter((r) => !used.has(r.product_id));
     if (!group.length) {
