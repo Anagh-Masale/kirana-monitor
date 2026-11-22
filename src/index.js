@@ -732,23 +732,26 @@ async function reconcileCatalog(env) {
       added++;
       continue;
     }
-    group.sort((a, b) => (Number(b.tracking) - Number(a.tracking)) || (Number(b.units) - Number(a.units)));
+    group.sort((a, b) => (Number(b.tracking) - Number(a.tracking)) || (Number(b.units) - Number(a.units)) || (Number(b.per_bundle) - Number(a.per_bundle)));
     const keep = group[0];
     group.forEach((g) => used.add(g.product_id));
     for (const g of group) if (g.product_id !== keep.product_id) { await env.DB.prepare("DELETE FROM inventory WHERE product_id=?").bind(g.product_id).run(); removed++; }
-    const newStatus = keep.tracking ? invStatus(keep.units, keep.threshold) : "in_stock";
+    // agar product configured hai (units/bundle/auto-sync/custom threshold) to tracking on rakho/wapas karo
+    const configured = Number(keep.units) > 0 || Number(keep.per_bundle) > 0 || Number(keep.auto_oos) === 1 || (Number(keep.threshold) || 5) !== 5;
+    const trk = (Number(keep.tracking) === 1 || configured) ? 1 : 0;
+    const newStatus = trk ? invStatus(keep.units, keep.threshold) : "in_stock";
     if (String(keep.product_id) !== String(c.product_id)) {
       await env.DB.prepare("DELETE FROM inventory WHERE product_id=?").bind(c.product_id).run(); // target free karo (dup)
-      await env.DB.prepare("UPDATE inventory SET product_id=?, sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, status=?, updated_at=? WHERE product_id=?")
-        .bind(c.product_id, c.sku, c.name, c.parent || null, moq, po, newStatus, Date.now(), keep.product_id).run();
+      await env.DB.prepare("UPDATE inventory SET product_id=?, sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, tracking=?, status=?, updated_at=? WHERE product_id=?")
+        .bind(c.product_id, c.sku, c.name, c.parent || null, moq, po, trk, newStatus, Date.now(), keep.product_id).run();
       merged++;
     } else {
       if (keep.portal_seen && Number(keep.portal_oos) !== po) {
         notes.push(`Portal: ${keep.name || c.name} ab ${po ? "OUT OF STOCK" : "IN STOCK"}`);
-        if (!po && (!keep.tracking || Number(keep.units) <= 0)) declareNeed.push(keep.name || c.name);
+        if (!po && (!trk || Number(keep.units) <= 0)) declareNeed.push(keep.name || c.name);
       }
-      await env.DB.prepare("UPDATE inventory SET sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, status=?, updated_at=? WHERE product_id=?")
-        .bind(c.sku, c.name, c.parent || null, moq, po, newStatus, Date.now(), c.product_id).run();
+      await env.DB.prepare("UPDATE inventory SET sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, tracking=?, status=?, updated_at=? WHERE product_id=?")
+        .bind(c.sku, c.name, c.parent || null, moq, po, trk, newStatus, Date.now(), c.product_id).run();
     }
   }
   // jo rows kisi live product se match nahi hue (sach me delist) → discontinued
