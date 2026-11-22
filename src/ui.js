@@ -194,6 +194,9 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .sbadge.disc{background:var(--mute-bg);color:var(--mute)}
 .srow.disc{opacity:.6}
 .skucode{font-size:11px;font-weight:700;color:var(--muted);background:var(--mute-bg);padding:2px 7px;border-radius:6px;font-family:ui-monospace,monospace}
+.stoprow{display:flex;gap:10px;align-items:center;margin-bottom:10px;max-width:880px}
+.stoprow .ssearch{flex:1}
+.stoprow .btn{white-space:nowrap;flex-shrink:0}
 .sfilters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;max-width:880px}
 .ssearch{flex:1;min-width:180px;font:inherit;font-size:14px;padding:10px 13px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
 .ssearch:focus{outline:none;border-color:var(--accent)}
@@ -540,14 +543,15 @@ function stockView(d, t) {
     <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Portal se products laao</button>`;
   const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;
   const cnt = (f) => rows.filter((r) => (r.tracking ? r.status : (Number(r.portal_oos) ? "oos" : "in_stock")) === f).length;
-  const header = `<div class="sfilters">
+  const header = `<div class="stoprow">
     <input class="ssearch" id="ssearch" placeholder="🔍 Product dhoondo…" oninput="filterStock()" autocomplete="off">
+    <button class="btn" onclick="discoverStock(this)">↺ Portal se sync</button></div>
     <div class="schips">
       <span class="schip on" data-f="all" onclick="stChip(this,'all')">Sabhi ${rows.length}</span>
       <span class="schip" data-f="in_stock" onclick="stChip(this,'in_stock')">In stock ${cnt("in_stock")}</span>
       <span class="schip" data-f="low" onclick="stChip(this,'low')">Low ${cnt("low")}</span>
       <span class="schip" data-f="oos" onclick="stChip(this,'oos')">OOS ${cnt("oos")}</span>
-    </div></div>`;
+    </div>`;
   const list = rows.map((r) => {
     const pb = Number(r.per_bundle) || 0;
     const bundleInfo = pb ? `<span class="bundleline">= ${Math.floor(r.units / pb)} bundle + ${r.units % pb} pcs</span>` : "";
@@ -576,8 +580,7 @@ function stockView(d, t) {
     <div class="srow3"><label class="sched">Schedule OOS ${tip("Is date/time par apne aap portal par OOS ho jayega.")}<input type="datetime-local" class="in-when"></label><button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button></div>
   </div>`;
   }).join("");
-  return `<div class="sub" style="margin-bottom:14px">${t("stockSub")}</div>${header}<div id="stocklist">${list}</div>
-    <button class="btn ghost" style="margin-top:6px" onclick="discoverStock(this)">↺ Portal se dubara laao (status + min-qty refresh)</button>`;
+  return `<div class="sub" style="margin-bottom:12px">${t("stockSub")}</div>${header}<div id="stocklist">${list}</div>`;
 }
 
 function stars(n) {

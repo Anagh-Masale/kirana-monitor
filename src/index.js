@@ -145,6 +145,15 @@ async function route(req, env) {
     if (!email || !code) return Response.json({ ok: false, error: "Email aur OTP dono daaliye" });
     return Response.json(await loginVerify(env, String(email).trim(), String(code).trim()).catch((e) => ({ ok: false, error: String(e).slice(0, 120) })));
   }
+  if (p === "/api/moq-debug") {
+    const q = (url.searchParams.get("q") || "chicken").toLowerCase();
+    const jp = await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true }, warehouse_id: Number(env.WAREHOUSE_ID) || 1534 } });
+    const prods = (jp?.data?.products || []).filter((pr) => String(pr.name || "").toLowerCase().includes(q));
+    const ids = prods.map((pr) => pr.id);
+    const je = await gwPost(env, "/dlg/auth/v1/b2b/seller-products/edit/list", { data: { product_ids: ids.map(Number) } });
+    const edits = (je?.data?.edits || []).filter((e) => ids.includes(e.product_id));
+    return Response.json({ products: prods, edits });
+  }
   if (p === "/api/ai-test") {
     if (!env.AI) return Response.json({ ok: false, reason: "env.AI binding missing" });
     const models = [env.AI_MODEL, "@cf/meta/llama-3.1-8b-instruct-fp8", "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/mistralai/mistral-small-3.1-24b-instruct", "@cf/meta/llama-3.2-3b-instruct"].filter(Boolean);
@@ -679,14 +688,20 @@ async function fetchEditMeta(env, ids) {
   if (!ids || !ids.length) return {};
   const j = await gwPost(env, "/dlg/auth/v1/b2b/seller-products/edit/list", { data: { product_ids: ids.map(Number) } });
   const edits = j?.data?.edits;
+  const groups = {};
+  if (Array.isArray(edits)) for (const e of edits) {
+    if (!e || e.product_id == null || !e.meta || e.meta.pack_size == null) continue;
+    (groups[String(e.product_id)] ||= []).push(e);
+  }
+  const ts = (e) => Number(e.updated_at || e.modified_at || e.created_at || e.updated_on || e.id || 0);
   const map = {};
-  if (Array.isArray(edits)) {
-    for (const e of edits) {
-      const pid = String(e.product_id), m = e.meta || {};
-      if (m.pack_size == null) continue;
-      // APPROVED ko preference, warna last
-      if (!map[pid] || e.status === "APPROVED") map[pid] = { pack_size: Number(m.pack_size) || 1, mrp: Number(m.mrp_number) || null, rate: Number(m.wholesale_rate) || null, grammage: m.grammage, unit: m.grammage_unit };
-    }
+  for (const pid in groups) {
+    const arr = groups[pid];
+    const approved = arr.filter((e) => /approv/i.test(e.status || ""));
+    const pool = approved.length ? approved : arr;
+    pool.sort((a, b) => ts(b) - ts(a)); // latest edit = current MOQ
+    const m = pool[0].meta;
+    map[pid] = { pack_size: Number(m.pack_size) || 1, mrp: Number(m.mrp_number) || null, rate: Number(m.wholesale_rate) || null, grammage: m.grammage, unit: m.grammage_unit };
   }
   return map;
 }
