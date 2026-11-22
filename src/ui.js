@@ -535,7 +535,7 @@ function suggView(d, lang) {
 }
 function tip(msg) { return `<span class="tip" onclick="tipToggle(this)">i<span class="tipbub">${esc(msg)}</span></span>`; }
 function stockView(d, t) {
-  const rows = (d.inventory && d.inventory.rows) || [];
+  const rows = ((d.inventory && d.inventory.rows) || []).filter((r) => r.status !== "discontinued");
   if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke portal catalog se poori product list aa jayegi, phir har product ki units set kar dijiye.</div>
     <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Portal se products laao</button>`;
   const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;

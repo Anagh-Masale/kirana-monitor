@@ -707,11 +707,6 @@ async function fetchCatalog(env) {
   }));
 }
 // Product identity ke liye normalized naam (size tak) — SKU badalne par bhi same rahe
-function prodKey(c) {
-  if (c.parent) return "p:" + c.parent;
-  const n = String(c.name || "").toLowerCase().replace(/\s+/g, " ").trim();
-  return "n:" + n;
-}
 // Catalog reconcile: SKU change par purana row MODIFY ho (settings carry), duplicate hate, delisted discontinue ho
 async function reconcileCatalog(env) {
   await ensureInventory(env);
@@ -719,46 +714,45 @@ async function reconcileCatalog(env) {
   if (!cat.length) return { merged: 0, added: 0, removed: 0 };
   const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
   const rows = (await env.DB.prepare("SELECT * FROM inventory").all()).results;
-  const groups = {};
-  for (const r of rows) (groups[prodKey({ parent: r.parent_item_id, name: r.name })] ||= []).push(r);
-  const seen = new Set();
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // rows ko naam-key AUR parent-key dono se index karo (purane rows me parent nahi hai)
+  const byName = {}, byParent = {};
+  for (const r of rows) { (byName[norm(r.name)] ||= []).push(r); if (r.parent_item_id) (byParent[String(r.parent_item_id)] ||= []).push(r); }
+  const used = new Set();
   const notes = [], declareNeed = [];
   let merged = 0, added = 0, removed = 0;
   for (const c of cat) {
-    const k = prodKey(c); seen.add(k);
+    const po = c.is_oos ? 1 : 0;
     const moq = meta[c.product_id]?.pack_size || null;
-    const group = groups[k] || [];
+    // match: pehle parent, phir naam; already-used rows chhodo
+    let group = ((c.parent && byParent[c.parent]) || byName[norm(c.name)] || []).filter((r) => !used.has(r.product_id));
     if (!group.length) {
       await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,parent_item_id,units,min_qty,threshold,status,tracking,portal_oos,portal_seen,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(c.product_id, c.sku, c.name, c.parent || null, 0, moq || 1, 5, "in_stock", 0, c.is_oos ? 1 : 0, 1, Date.now()).run();
+        .bind(c.product_id, c.sku, c.name, c.parent || null, 0, moq || 1, 5, "in_stock", 0, po, 1, Date.now()).run();
       added++;
       continue;
     }
-    // keeper = jisme tracking/units sabse zyada (user ne mehnat ki hai)
     group.sort((a, b) => (Number(b.tracking) - Number(a.tracking)) || (Number(b.units) - Number(a.units)));
     const keep = group[0];
+    group.forEach((g) => used.add(g.product_id));
     for (const g of group) if (g.product_id !== keep.product_id) { await env.DB.prepare("DELETE FROM inventory WHERE product_id=?").bind(g.product_id).run(); removed++; }
+    const newStatus = keep.tracking ? invStatus(keep.units, keep.threshold) : "in_stock";
     if (String(keep.product_id) !== String(c.product_id)) {
-      // dup (naya SKU) group me tha, upar delete ho gaya — ab target free; keeper ko naye id par le jao, settings wahi
-      await env.DB.prepare("UPDATE inventory SET product_id=?, sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, status=CASE WHEN status='discontinued' THEN 'in_stock' ELSE status END, updated_at=? WHERE product_id=?")
-        .bind(c.product_id, c.sku, c.name, c.parent || null, moq, c.is_oos ? 1 : 0, Date.now(), keep.product_id).run();
+      await env.DB.prepare("DELETE FROM inventory WHERE product_id=?").bind(c.product_id).run(); // target free karo (dup)
+      await env.DB.prepare("UPDATE inventory SET product_id=?, sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, status=?, updated_at=? WHERE product_id=?")
+        .bind(c.product_id, c.sku, c.name, c.parent || null, moq, po, newStatus, Date.now(), keep.product_id).run();
       merged++;
     } else {
-      // same id — portal par manual OOS/in-stock change hua to note karo
-      const po = c.is_oos ? 1 : 0;
       if (keep.portal_seen && Number(keep.portal_oos) !== po) {
         notes.push(`Portal: ${keep.name || c.name} ab ${po ? "OUT OF STOCK" : "IN STOCK"}`);
         if (!po && (!keep.tracking || Number(keep.units) <= 0)) declareNeed.push(keep.name || c.name);
       }
-      await env.DB.prepare("UPDATE inventory SET sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, updated_at=? WHERE product_id=?")
-        .bind(c.sku, c.name, c.parent || null, moq, po, Date.now(), c.product_id).run();
+      await env.DB.prepare("UPDATE inventory SET sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, status=?, updated_at=? WHERE product_id=?")
+        .bind(c.sku, c.name, c.parent || null, moq, po, newStatus, Date.now(), c.product_id).run();
     }
   }
-  // jo catalog me nahi rahe (delist, koi replacement nahi) → discontinued, alerts band
-  for (const [k, group] of Object.entries(groups)) if (!seen.has(k)) for (const g of group) {
-    await env.DB.prepare("UPDATE inventory SET status='discontinued', tracking=0, updated_at=? WHERE product_id=?").bind(Date.now(), g.product_id).run();
-    removed++;
-  }
+  // jo rows kisi live product se match nahi hue (sach me delist) → discontinued
+  for (const r of rows) if (!used.has(r.product_id)) { await env.DB.prepare("UPDATE inventory SET status='discontinued', tracking=0, updated_at=? WHERE product_id=?").bind(Date.now(), r.product_id).run(); removed++; }
   // portal-change notifications
   if (notes.length) await env.DB.batch(notes.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(Date.now(), "info", t)));
   if (declareNeed.length) {
