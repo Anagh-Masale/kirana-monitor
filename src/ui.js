@@ -191,6 +191,9 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .sched{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);font-weight:700}
 .sched input{font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff}
 .sbadge.warn{background:var(--warn-bg);color:var(--warn)}
+.sbadge.disc{background:var(--mute-bg);color:var(--mute)}
+.srow.disc{opacity:.6}
+.skucode{font-size:11px;font-weight:700;color:var(--muted);background:var(--mute-bg);padding:2px 7px;border-radius:6px;font-family:ui-monospace,monospace}
 .sfilters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;max-width:880px}
 .ssearch{flex:1;min-width:180px;font:inherit;font-size:14px;padding:10px 13px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
 .ssearch:focus{outline:none;border-color:var(--accent)}
@@ -551,10 +554,11 @@ function stockView(d, t) {
     const portalOos = Number(r.portal_oos) === 1;
     const effSt = r.tracking ? r.status : (portalOos ? "oos" : "in_stock");
     const mismatch = r.tracking && ((r.status === "oos" && !portalOos) || (r.status !== "oos" && portalOos && Number(r.units) > 0));
-    const declareNeed = !portalOos && (!r.tracking || Number(r.units) <= 0);
-    return `<div class="srow ${r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}" data-name="${esc((r.name || r.sku || "").toLowerCase())}" data-st="${effSt}">
-    <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}
-      <span class="sbadge ${portalOos ? "oos" : "ok"}">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn">⚠ mismatch</span>` : ""}</div>
+    const declareNeed = r.status !== "discontinued" && !portalOos && (!r.tracking || Number(r.units) <= 0);
+    const disc = r.status === "discontinued";
+    return `<div class="srow ${disc ? "disc" : r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}" data-name="${esc((r.name || r.sku || "").toLowerCase())}" data-st="${disc ? "discontinued" : effSt}">
+    <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.sku ? `<span class="skucode">${esc(r.sku)}</span>` : ""}${disc ? `<span class="sbadge disc">Discontinued</span>` : r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}
+      ${disc ? "" : `<span class="sbadge ${portalOos ? "oos" : "ok"}">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn">⚠ mismatch</span>` : ""}`}</div>
     ${declareNeed ? `<div class="declare">Portal par IN STOCK hai par yahan stock declare nahi — units bhariye warna order aayega aur track nahi hoga.</div>` : ""}
     <div class="sctrl">
       <label>Units bache (pcs) ${tip("Abhi kitne single pieces/sachet bache hain. Order aate hi apne aap ghatega.")}<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>

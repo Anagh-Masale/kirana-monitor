@@ -234,34 +234,12 @@ async function route(req, env) {
     return Response.json({ ok: true, scheduled: when });
   }
   if (p === "/api/stock/discover" && post) {
-    await ensureInventory(env);
-    const cat = await fetchCatalog(env).catch(() => []);
-    if (!cat.length) {
-      // fallback: recent orders ke items se
-      const ords = (await env.DB.prepare("SELECT id FROM orders ORDER BY CAST(id AS INTEGER) DESC LIMIT 25").all()).results;
-      let f2 = 0;
-      for (const o of ords) {
-        const lines = await fetchOrderLines(env, o.id).catch(() => []);
-        for (const ln of lines) {
-          const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
-            .bind(ln.product_id, ln.product_id, ln.name || "", 0, 1, 5, "in_stock", 0, Date.now()).run();
-          if (r.meta && r.meta.changes) f2++;
-        }
-      }
-      if (!f2) return Response.json({ ok: false, found: 0, total: 0, reason: "Portal se product list nahi mili — cookie/login shayad expire ho gaya. Settings me dubara Gmail login kijiye, phir try." });
-      return Response.json({ ok: true, found: f2, total: f2 });
+    const r = await reconcileCatalog(env);
+    if (!r.added && !r.merged && !(await env.DB.prepare("SELECT COUNT(*) n FROM inventory").first())?.n) {
+      return Response.json({ ok: false, found: 0, total: 0, reason: "Portal se product list nahi mili — cookie/login shayad expire ho gaya. Settings me dubara Gmail login kijiye, phir try." });
     }
-    // Seller ne portal par jo min-order-qty (pack_size) set kiya wo auto laao
-    const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
-    let found = 0, updated = 0;
-    for (const c of cat) {
-      const moq = meta[c.product_id]?.pack_size || 1;
-      const r = await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,units,min_qty,threshold,status,tracking,portal_oos,portal_seen,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(c.product_id, c.sku, c.name, 0, moq, 5, "in_stock", 0, c.is_oos ? 1 : 0, 1, Date.now()).run();
-      if (r.meta && r.meta.changes) found++;
-      else { await env.DB.prepare("UPDATE inventory SET sku=CASE WHEN sku='' OR sku IS NULL THEN ? ELSE sku END, name=?, min_qty=?, portal_oos=?, portal_seen=1 WHERE product_id=?").bind(c.sku, c.name, moq, c.is_oos ? 1 : 0, c.product_id).run(); updated++; }
-    }
-    return Response.json({ ok: true, found, updated, total: cat.length });
+    const total = (await env.DB.prepare("SELECT COUNT(*) n FROM inventory WHERE status!='discontinued'").first())?.n || 0;
+    return Response.json({ ok: true, found: r.added, updated: r.merged, removed: r.removed, total });
   }
   if (p === "/api/data") return Response.json(await loadDashboard(env));
   if (p === "/api/latest") {
@@ -515,7 +493,7 @@ async function ensureInventory(env) {
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory (product_id TEXT PRIMARY KEY, sku TEXT, name TEXT, units INTEGER DEFAULT 0, min_qty INTEGER DEFAULT 1, threshold INTEGER DEFAULT 5, status TEXT DEFAULT 'in_stock', oos_at INTEGER, auto_oos INTEGER DEFAULT 0, tracking INTEGER DEFAULT 0, per_bundle INTEGER DEFAULT 0, portal_oos INTEGER DEFAULT 0, portal_seen INTEGER DEFAULT 0, updated_at INTEGER)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS inv_ledger (order_id TEXT, product_id TEXT, qty INTEGER, ts INTEGER, kind TEXT, PRIMARY KEY(order_id, product_id))`),
   ]);
-  for (const col of ["per_bundle INTEGER DEFAULT 0", "portal_oos INTEGER DEFAULT 0", "portal_seen INTEGER DEFAULT 0"]) {
+  for (const col of ["per_bundle INTEGER DEFAULT 0", "portal_oos INTEGER DEFAULT 0", "portal_seen INTEGER DEFAULT 0", "parent_item_id TEXT"]) {
     await env.DB.prepare(`ALTER TABLE inventory ADD COLUMN ${col}`).run().catch(() => {});
   }
 }
@@ -540,32 +518,8 @@ async function syncPortalStatus(env) {
   // seller app ki suggestions bhi refresh karo (read-only dikhane ke liye)
   const cards = await fetchHomeCards(env).catch(() => null);
   if (cards) await setSetting(env, "home_cards", JSON.stringify(cards));
-  const cat = await fetchCatalog(env).catch(() => []);
-  if (!cat.length) return;
-  const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
-  const rows = new Map((await env.DB.prepare("SELECT * FROM inventory").all()).results.map((r) => [String(r.product_id), r]));
-  const now = Date.now();
-  const notes = [], declareNeed = [];
-  for (const c of cat) {
-    const po = c.is_oos ? 1 : 0;
-    const inv = rows.get(c.product_id);
-    if (!inv) continue;
-    // portal ka min-order-qty (pack_size) yahan auto sync
-    const moq = meta[c.product_id]?.pack_size;
-    if (moq && Number(inv.min_qty) !== Number(moq)) await env.DB.prepare("UPDATE inventory SET min_qty=? WHERE product_id=?").bind(Number(moq), c.product_id).run();
-    if (inv.portal_seen && Number(inv.portal_oos) !== po) {
-      notes.push(`Portal: ${inv.name || c.name} ab ${po ? "OUT OF STOCK" : "IN STOCK"}`);
-      if (!po && (!inv.tracking || Number(inv.units) <= 0)) declareNeed.push(inv.name || c.name);
-    }
-    await env.DB.prepare("UPDATE inventory SET portal_oos=?, portal_seen=1, name=CASE WHEN name='' OR name IS NULL THEN ? ELSE name END WHERE product_id=?").bind(po, c.name, c.product_id).run();
-  }
-  if (notes.length) await env.DB.batch(notes.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "info", t)));
-  if (declareNeed.length) {
-    const body = declareNeed.map((n) => `• ${n}`).join("\n");
-    await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(now, "error", `⚠️ Portal IN STOCK par app me stock declare nahi: ${declareNeed.length}`).run();
-    await pushNotify(env, "alert", `⚠️ Stock declare karo (${declareNeed.length})`, body);
-    await sendMail(env, `[Anagh Stock] Portal in-stock par app me declare nahi (${declareNeed.length})`, emailHtml({ kind: "error", code: "DECLARE", message: body, env, now }), "alert");
-  }
+  // catalog reconcile: portal status + min-qty sync, SKU-change par merge, duplicate/delisted clean, change notifications
+  await reconcileCatalog(env).catch(() => {});
 }
 function invStatus(units, threshold) {
   if (units <= 0) return "oos";
@@ -749,14 +703,78 @@ async function fetchCatalog(env) {
   if (!Array.isArray(prods)) return [];
   return prods.filter((p) => p && p.id != null).map((p) => ({
     product_id: String(p.id), sku: p.sku_code || "", name: p.name || p.name_label || "", is_oos: !!p.is_oos,
+    parent: p.parent_item_id != null ? String(p.parent_item_id) : (p.item_id != null ? String(p.item_id) : ""),
   }));
+}
+// Product identity ke liye normalized naam (size tak) — SKU badalne par bhi same rahe
+function prodKey(c) {
+  if (c.parent) return "p:" + c.parent;
+  const n = String(c.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+  return "n:" + n;
+}
+// Catalog reconcile: SKU change par purana row MODIFY ho (settings carry), duplicate hate, delisted discontinue ho
+async function reconcileCatalog(env) {
+  await ensureInventory(env);
+  const cat = await fetchCatalog(env).catch(() => []);
+  if (!cat.length) return { merged: 0, added: 0, removed: 0 };
+  const meta = await fetchEditMeta(env, cat.map((c) => c.product_id)).catch(() => ({}));
+  const rows = (await env.DB.prepare("SELECT * FROM inventory").all()).results;
+  const groups = {};
+  for (const r of rows) (groups[prodKey({ parent: r.parent_item_id, name: r.name })] ||= []).push(r);
+  const seen = new Set();
+  const notes = [], declareNeed = [];
+  let merged = 0, added = 0, removed = 0;
+  for (const c of cat) {
+    const k = prodKey(c); seen.add(k);
+    const moq = meta[c.product_id]?.pack_size || null;
+    const group = groups[k] || [];
+    if (!group.length) {
+      await env.DB.prepare("INSERT OR IGNORE INTO inventory(product_id,sku,name,parent_item_id,units,min_qty,threshold,status,tracking,portal_oos,portal_seen,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(c.product_id, c.sku, c.name, c.parent || null, 0, moq || 1, 5, "in_stock", 0, c.is_oos ? 1 : 0, 1, Date.now()).run();
+      added++;
+      continue;
+    }
+    // keeper = jisme tracking/units sabse zyada (user ne mehnat ki hai)
+    group.sort((a, b) => (Number(b.tracking) - Number(a.tracking)) || (Number(b.units) - Number(a.units)));
+    const keep = group[0];
+    for (const g of group) if (g.product_id !== keep.product_id) { await env.DB.prepare("DELETE FROM inventory WHERE product_id=?").bind(g.product_id).run(); removed++; }
+    if (String(keep.product_id) !== String(c.product_id)) {
+      // dup (naya SKU) group me tha, upar delete ho gaya — ab target free; keeper ko naye id par le jao, settings wahi
+      await env.DB.prepare("UPDATE inventory SET product_id=?, sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, status=CASE WHEN status='discontinued' THEN 'in_stock' ELSE status END, updated_at=? WHERE product_id=?")
+        .bind(c.product_id, c.sku, c.name, c.parent || null, moq, c.is_oos ? 1 : 0, Date.now(), keep.product_id).run();
+      merged++;
+    } else {
+      // same id — portal par manual OOS/in-stock change hua to note karo
+      const po = c.is_oos ? 1 : 0;
+      if (keep.portal_seen && Number(keep.portal_oos) !== po) {
+        notes.push(`Portal: ${keep.name || c.name} ab ${po ? "OUT OF STOCK" : "IN STOCK"}`);
+        if (!po && (!keep.tracking || Number(keep.units) <= 0)) declareNeed.push(keep.name || c.name);
+      }
+      await env.DB.prepare("UPDATE inventory SET sku=?, name=?, parent_item_id=?, min_qty=COALESCE(?,min_qty), portal_oos=?, portal_seen=1, updated_at=? WHERE product_id=?")
+        .bind(c.sku, c.name, c.parent || null, moq, po, Date.now(), c.product_id).run();
+    }
+  }
+  // jo catalog me nahi rahe (delist, koi replacement nahi) → discontinued, alerts band
+  for (const [k, group] of Object.entries(groups)) if (!seen.has(k)) for (const g of group) {
+    await env.DB.prepare("UPDATE inventory SET status='discontinued', tracking=0, updated_at=? WHERE product_id=?").bind(Date.now(), g.product_id).run();
+    removed++;
+  }
+  // portal-change notifications
+  if (notes.length) await env.DB.batch(notes.map((t) => env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(Date.now(), "info", t)));
+  if (declareNeed.length) {
+    const body = declareNeed.map((n) => `• ${n}`).join("\n");
+    await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)").bind(Date.now(), "error", `⚠️ Portal IN STOCK par app me stock declare nahi: ${declareNeed.length}`).run();
+    await pushNotify(env, "alert", `⚠️ Stock declare karo (${declareNeed.length})`, body).catch(() => {});
+    await sendMail(env, `[Anagh Stock] Portal in-stock par app me declare nahi (${declareNeed.length})`, emailHtml({ kind: "error", code: "DECLARE", message: body, env, now: Date.now() }), "alert").catch(() => {});
+  }
+  return { merged, added, removed };
 }
 
 // Stock page ke liye low+oos count
 async function inventoryList(env) {
   await ensureInventory(env);
-  const rows = (await env.DB.prepare("SELECT * FROM inventory ORDER BY CASE status WHEN 'oos' THEN 0 WHEN 'low' THEN 1 ELSE 2 END, tracking DESC, name").all()).results;
-  const alerts = rows.filter((r) => r.tracking && (r.status === "oos" || r.status === "low")).length;
+  const rows = (await env.DB.prepare("SELECT * FROM inventory ORDER BY CASE status WHEN 'oos' THEN 0 WHEN 'low' THEN 1 WHEN 'discontinued' THEN 3 ELSE 2 END, tracking DESC, name").all()).results;
+  const alerts = rows.filter((r) => r.tracking && r.status !== "discontinued" && (r.status === "oos" || r.status === "low")).length;
   return { rows, alerts };
 }
 
@@ -1124,8 +1142,8 @@ function buildBotContext(d) {
 
   if (inv.length) {
     L.push("");
-    L.push("STOCK [product | app_units_pcs | status | portal | per_bundle | min_order_pcs]:");
-    for (const r of inv) L.push(`${r.name || r.sku} | ${r.units} | ${r.tracking ? r.status : "track-off"} | portal ${Number(r.portal_oos) ? "OOS" : "in-stock"} | bundle=${r.per_bundle || "-"} | moq=${r.min_qty}`);
+    L.push("STOCK [product | sku | app_units_pcs | status | portal | per_bundle | min_order_pcs]:");
+    for (const r of inv) L.push(`${r.name || r.sku} | ${r.sku || "-"} | ${r.units} | ${r.tracking ? r.status : "track-off"} | portal ${Number(r.portal_oos) ? "OOS" : "in-stock"} | bundle=${r.per_bundle || "-"} | moq=${r.min_qty}`);
   }
   if (ins.length) {
     L.push("");
