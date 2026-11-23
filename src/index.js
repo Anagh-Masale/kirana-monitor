@@ -242,6 +242,34 @@ async function route(req, env) {
     await env.DB.prepare("UPDATE inventory SET oos_at=?, updated_at=? WHERE product_id=?").bind(when > 0 ? when : null, Date.now(), String(b.product_id)).run();
     return Response.json({ ok: true, scheduled: when });
   }
+  if (p === "/api/stock/link" && post) {
+    // Naam + SKU dono change ho gaye (purana delist, naya SKU) → auto-match possible nahi.
+    // User manually naye product ko purane se link karta hai: purane ka stock+settings naye me carry.
+    const b = await req.json().catch(() => ({}));
+    const from = String(b.from || ""), to = String(b.to || "");
+    if (!from || !to || from === to) return new Response("need from+to", { status: 400 });
+    await ensureInventory(env);
+    const src = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(from).first();
+    const dst = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(to).first();
+    if (!src || !dst) return Response.json({ ok: false, error: "not-found" });
+    const units = Math.max(0, Math.round(Number(src.units) || 0));
+    const per_bundle = Math.max(0, Math.round(Number(src.per_bundle) || 0));
+    const threshold = src.threshold != null ? Math.max(0, Math.round(Number(src.threshold))) : dst.threshold;
+    const tracking = Number(src.tracking) ? 1 : 0;
+    const auto_oos = Number(src.auto_oos) ? 1 : 0;
+    const status = invStatus(units, threshold);
+    // NOTE: min_qty naye product ka (dst) hi rakhte hain — wo portal ke naye pack size se aata hai, purana nahi.
+    await env.DB.prepare("UPDATE inventory SET units=?, per_bundle=?, threshold=?, tracking=?, auto_oos=?, status=?, updated_at=? WHERE product_id=?")
+      .bind(units, per_bundle, threshold, tracking, auto_oos, status, Date.now(), to).run();
+    await env.DB.prepare("UPDATE inventory SET status='discontinued', tracking=0, updated_at=? WHERE product_id=?").bind(Date.now(), from).run();
+    // auto-sync on ho to portal bhi align
+    let portal = null;
+    if (tracking && auto_oos && units > 0 && Number(dst.portal_oos) === 1) portal = await updateProductOOS(env, to, false).catch(() => null);
+    if (tracking && auto_oos && units <= 0 && Number(dst.portal_oos) === 0) portal = await updateProductOOS(env, to, true).catch(() => null);
+    await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
+      .bind(Date.now(), "info", `Stock link: "${src.name || src.sku || from}" ka stock → "${dst.name || dst.sku || to}" (SKU change)`).run().catch(() => {});
+    return Response.json({ ok: true, units, portal });
+  }
   if (p === "/api/stock/discover" && post) {
     const r = await reconcileCatalog(env);
     if (!r.added && !r.merged && !(await env.DB.prepare("SELECT COUNT(*) n FROM inventory").first())?.n) {
@@ -466,8 +494,16 @@ async function loadDashboard(env) {
   const ordersInPeriod = ots.filter((x) => x >= periodStart && x <= todayStart).length;
   const avgDays = Math.max(1, Math.round((todayStart - periodStart) / 864e5) + 1);
   const periodOrders = orders.results.filter((o) => { const x = placedTs(o.placed_at, now); return x != null && x >= periodStart && x <= todayStart; });
-  const totalSale = periodOrders.reduce((a, o) => a + (Number(o.amount) || 0), 0);
-  const dailyAvg = { avg: Math.round((ordersInPeriod / avgDays) * 10) / 10, orders: ordersInPeriod, days: avgDays, since: periodStart, totalSale, avgSale: Math.round(totalSale / avgDays) };
+  const ownSale = periodOrders.reduce((a, o) => a + (Number(o.amount) || 0), 0);
+  // IMPORTANT: average ko unhi "This Month" numbers se nikalo jo cards dikhate hain (Kirana ke apne metrics),
+  // warna do alag source ho jate hain aur numbers reconcile nahi karte. Metric na mile to apni orders-table par fallback.
+  const curMetrics = cur ? JSON.parse(cur.metrics || "{}") : {};
+  const mget = (re) => { for (const [k, v] of Object.entries(curMetrics)) { if (re.test(k)) { const n = Number(v); if (Number.isFinite(n)) return n; } } return null; };
+  const mSale = mget(/month.*sale/i);
+  const mOrders = mget(/month.*order/i);
+  const totalSale = mSale != null ? mSale : ownSale;
+  const orderCount = mOrders != null ? mOrders : ordersInPeriod;
+  const dailyAvg = { avg: Math.round((orderCount / avgDays) * 10) / 10, orders: orderCount, days: avgDays, since: periodStart, totalSale, avgSale: Math.round(totalSale / avgDays) };
   return {
     now,
     dailyAvg,

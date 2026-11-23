@@ -210,6 +210,8 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .in-min[readonly]{background:var(--mute-bg);color:var(--muted);cursor:not-allowed}
 .bundlerow{margin-top:7px}.bundleline{font-size:12px;color:var(--accent-dark);font-weight:700;background:var(--mute-bg);padding:3px 9px;border-radius:7px;display:inline-block}
 .declare{margin:8px 0 2px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:7px 10px;border-radius:9px;line-height:1.4}
+.linkold{margin:9px 0 2px;font-size:12.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#F4EEE4;border:1px dashed var(--line);padding:9px 11px;border-radius:10px}
+.linkold select{flex:1;min-width:150px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:12.5px}
 @media(max-width:620px){.srow{padding:14px}.sctrl{grid-template-columns:1fr 1fr;gap:10px}.sched{margin-left:0;width:100%}.sched input{width:100%}}
 .up{color:var(--good)}.down{color:var(--bad)}
 .rsum{display:flex;align-items:center;gap:16px;margin-bottom:8px}.rsum .big{font-size:40px;font-weight:800;line-height:1}
@@ -387,6 +389,14 @@ async function saveStock(btn){var r=sRow(btn),o=btn.textContent;btn.textContent=
  var body={product_id:r.dataset.pid,units:+r.querySelector(".in-units").value,per_bundle:+r.querySelector(".in-pb").value,threshold:+r.querySelector(".in-thr").value,min_qty:+r.querySelector(".in-min").value,tracking:r.querySelector(".in-track").checked,auto_oos:r.querySelector(".in-auto").checked};
  try{var j=await (await fetch("/api/stock/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)})).json();
   toast("✅ Stock save"+(j&&j.portal&&j.portal.ok?" + portal update":""),"",false);setTimeout(function(){location.reload();},700);}catch(e){btn.textContent=o;}}
+async function linkOld(btn){var r=sRow(btn),sel=r.querySelector(".in-link"),from=sel&&sel.value;
+ if(!from){alert("Pehle purana product chuniye");return;}
+ var nm=sel.options[sel.selectedIndex].text;
+ if(!confirm('"'+nm+'" ka stock aur settings is naye product me le aayein? Purana discontinue ho jayega.'))return;
+ var o=btn.textContent;btn.textContent="…";
+ try{var j=await (await fetch("/api/stock/link",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from:from,to:r.dataset.pid})})).json();
+  if(j&&j.ok){toast("🔗 Link ho gaya — "+(j.units||0)+" pcs stock aa gaya","",false);setTimeout(function(){location.reload();},800);}
+  else{btn.textContent=o;toast("Link fail","Dubara try kijiye",false);}}catch(e){btn.textContent=o;toast("Error","",false);}}
 async function markOOSNow(btn){var r=sRow(btn);if(!confirm("Is product ko ABHI portal par OUT OF STOCK karein?"))return;
  var j=await (await fetch("/api/stock/oos",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({product_id:r.dataset.pid,when:"now"})})).json();
  toast(j&&j.portal&&j.portal.ok?"⛔ Portal par OOS ho gaya":"⛔ OOS mark (portal update check karein)","",false);setTimeout(function(){location.reload();},750);}
@@ -539,6 +549,7 @@ function suggView(d, lang) {
 function tip(msg) { return `<span class="tip" onclick="tipToggle(this)">i<span class="tipbub">${esc(msg)}</span></span>`; }
 function stockView(d, t) {
   const rows = ((d.inventory && d.inventory.rows) || []).filter((r) => r.status !== "discontinued");
+  const discList = ((d.inventory && d.inventory.rows) || []).filter((r) => r.status === "discontinued");
   if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke portal catalog se poori product list aa jayegi, phir har product ki units set kar dijiye.</div>
     <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Portal se products laao</button>`;
   const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;
@@ -564,6 +575,9 @@ function stockView(d, t) {
     <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.sku ? `<span class="skucode">${esc(r.sku)}</span>` : ""}${disc ? `<span class="sbadge disc">Discontinued</span>` : r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}
       ${disc ? "" : `<span class="sbadge ${portalOos ? "oos" : "ok"}">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn">⚠ mismatch</span>` : ""}`}</div>
     ${declareNeed ? `<div class="declare">Portal par IN STOCK hai par yahan stock declare nahi — units bhariye warna order aayega aur track nahi hoga.</div>` : ""}
+    ${(!disc && !r.tracking && Number(r.units) === 0 && !pb && discList.length) ? `<div class="linkold">🔗 Naya SKU? Purane product ka stock yahan le aao:
+      <select class="in-link"><option value="">— purana product chuno —</option>${discList.map((o) => `<option value="${esc(o.product_id)}">${esc(o.name || o.sku || o.product_id)}${o.sku ? ` (${esc(o.sku)})` : ""} · ${Number(o.units) || 0} pcs</option>`).join("")}</select>
+      <button class="btn mini" onclick="linkOld(this)">Link karo</button></div>` : ""}
     <div class="sctrl">
       <label>Units bache (pcs) ${tip("Abhi kitne single pieces/sachet bache hain. Order aate hi apne aap ghatega.")}<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
       <label>Pcs per bundle ${tip("1 packet/bundle me kitne pcs (jaise 20). Bundles isi se dikhega. Khaali/0 = sirf pcs.")}<input type="number" class="in-pb" value="${pb}" min="0" inputmode="numeric"></label>
