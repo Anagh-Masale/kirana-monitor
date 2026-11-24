@@ -27,8 +27,14 @@ async function route(req, env) {
       return new Response("unauthorized", { status: 401 });
     const body = await req.json();
     if (body.state) {
-      await setSetting(env, "KC_STATE", body.state);
-      await setSetting(env, "GW_COOKIE", cookieHeaderFromState(body.state) || ""); // fresh cookie se fast-lane reset
+      // ANTI-CLOBBER: naya state tabhi lo jab uska access-token purane se naya (ya barabar) ho.
+      // Warna collector purane (expired) token se fresh token overwrite kar deta hai.
+      const newExp = accessExpFromState(body.state);
+      const curExp = accessExpFromState(await getSetting(env, "KC_STATE"));
+      if (curExp == null || (newExp != null && newExp >= curExp)) {
+        await setSetting(env, "KC_STATE", body.state);
+        await setSetting(env, "GW_COOKIE", cookieHeaderFromState(body.state) || ""); // fresh cookie se fast-lane reset
+      }
       delete body.state;
     }
     if (body.error) {
@@ -194,6 +200,15 @@ async function route(req, env) {
       const isOos = to === "oos";
       const base = env.GW_BASE || "https://gateway.kirana.club";
       const email = (await getSetting(env, "seller_email")) || env.SELLER_EMAIL || "anaghmasala@gmail.com";
+      // Product ka is_oos TEEN views me padho: bina warehouse, 1534, 842002 — portal kaunsa view dikhata hai pata chale
+      const readView = async (whVal) => {
+        const data = { filters: { sellers: [], show_merged: true } };
+        if (whVal != null) data.warehouse_id = whVal;
+        const j = await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data });
+        const pr = (j?.data?.products || []).find((x) => x.id === target.id);
+        return pr ? (pr.is_oos && typeof pr.is_oos === "object" ? "OOS" : (pr.is_oos === null ? "in_stock" : JSON.stringify(pr.is_oos))) : "not-found";
+      };
+      const readAll = async () => ({ noWarehouse: await readView(undefined), wh1534: await readView(1534), wh842002: await readView(842002) });
       const doWrite = async (whVal) => {
         const data = { seller: env.SELLER_ID || "anagh", productID: Number(target.id), updates: [{ key: "is_oos", value: isOos }] };
         if (whVal != null) data.warehouse_id = whVal;
@@ -206,15 +221,16 @@ async function route(req, env) {
               "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", cookie },
             body: JSON.stringify({ updated_by: email, request_source: "B2B_EXTERNAL", data }),
           });
-          status = res.status; bodyText = (await res.text()).slice(0, 1200);
+          status = res.status; bodyText = (await res.text()).slice(0, 400);
         } catch (e) { err = String(e); }
-        return { warehouse_id_sent: whVal === undefined ? "(omitted)" : whVal, httpStatus: status, responseBody: bodyText, fetchError: err };
+        const views_after = await readAll();
+        return { warehouse_id_sent: whVal === undefined ? "(omitted)" : whVal, httpStatus: status, responseBody: bodyText, fetchError: err, views_after };
       };
-      const tryNoWh = await doWrite(undefined);         // bina warehouse_id
-      const tryProdWh = target.warehouse_id != null ? await doWrite(Number(target.warehouse_id)) : null; // product ka apna warehouse_id
-      // write ke baad dubara padho (bina warehouse_id, jo working read path hai)
-      const after = (noWh?.data?.products ? (await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true } } }))?.data?.products : [])?.find((pr) => pr.id === target.id);
-      write = { targetId: target.id, targetName: target.name, tryNoWh, tryProdWh, is_oos_after: after ? after.is_oos : "?" };
+      const want = isOos ? "OOS" : "in_stock";
+      const views_before = await readAll();
+      const attempts = [];
+      for (const wh of [1534, 842002]) attempts.push(await doWrite(wh));
+      write = { targetId: target.id, targetName: target.name, targetSku: target.sku_code, wantedState: want, views_before, attempts };
     }
     return Response.json({ cookieInfo, counts, dataKeys, matched, firstFull, write });
   }
@@ -331,6 +347,80 @@ async function route(req, env) {
     }
     const win = results.find((r) => r.freshToken);
     return Response.json({ found: win || null, all: results });
+  }
+  if (p === "/api/session-debug") {
+    // NextAuth session ke andar fresh access token hai kya? Sirf structure + exp, koi value nahi.
+    const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const jwtExp = (val) => { try { const pr = String(val).split("."); if (pr.length !== 3) return null; let b = pr[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "="; const pl = JSON.parse(atob(b)); return pl && pl.exp ? pl.exp : null; } catch (_) { return null; } };
+    let status = 0, err = "", shape = [];
+    try {
+      const res = await fetch("https://supplier.kirana.club/api/auth/session", { headers: { accept: "application/json", cookie, referer: "https://supplier.kirana.club/", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" } });
+      status = res.status;
+      const j = await res.json();
+      const walk = (obj, path) => {
+        if (obj && typeof obj === "object") { for (const k of Object.keys(obj)) walk(obj[k], path ? path + "." + k : k); return; }
+        const v = obj;
+        if (typeof v === "string") {
+          const exp = jwtExp(v);
+          const looksToken = v.length > 40;
+          shape.push({ path, type: "string", len: v.length, looksJWT: exp != null, jwt_exp: exp ? new Date(exp * 1000).toISOString() : null, jwt_future: exp ? exp > nowSec : null, maybeToken: looksToken });
+        } else {
+          shape.push({ path, type: typeof v, value: (typeof v === "number" || typeof v === "boolean") ? v : String(v).slice(0, 30) });
+        }
+      };
+      walk(j, "");
+    } catch (e) { err = String(e).slice(0, 120); }
+    return Response.json({ status, err, shape });
+  }
+  if (p === "/api/refresh-debug3") {
+    // b2b namespace (jahan login hai) me refresh endpoint dhoondo
+    const rawState = await getSetting(env, "KC_STATE");
+    let st; try { st = JSON.parse(rawState || "{}"); } catch (_) { st = {}; }
+    const nowSec = Math.floor(Date.now() / 1000);
+    const jwtExp = (val) => { try { const pr = String(val).split("."); if (pr.length !== 3) return null; let b = pr[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "="; const pl = JSON.parse(atob(b)); return pl && pl.exp ? pl.exp : null; } catch (_) { return null; } };
+    let refreshTok = null, refreshExp = -1;
+    const cookiesArr = Array.isArray(st.cookies) ? st.cookies.filter((c) => (c.domain || "").includes("kirana.club")) : (cookieHeaderFromState(rawState) || "").split(/;\s*/).map((kv) => ({ value: kv.slice(kv.indexOf("=") + 1) }));
+    for (const c of cookiesArr) { const e = jwtExp(c.value); if (e && e > nowSec && e > refreshExp) { refreshTok = c.value; refreshExp = e; } }
+    if (!refreshTok) return Response.json({ error: "koi valid (future) refresh token nahi mila — pehle OTP login karo" });
+    const cookie = cookieHeaderFromState(rawState);
+    const base = env.GW_BASE || "https://gateway.kirana.club";
+    const H = { accept: "application/json, text/plain, */*", origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", cookie };
+    const scanFresh = (sc, txt) => { let f = null; if (sc) for (const m of sc.matchAll(/([A-Za-z0-9\-_]+)=([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)/g)) { const e = jwtExp(m[2]); if (e && e > nowSec + 600) f = "cookie:" + new Date(e * 1000).toISOString(); } if (txt) for (const m of txt.matchAll(/([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)/g)) { const e = jwtExp(m[1]); if (e && e > nowSec + 600) f = (f ? f + " | " : "") + "body:" + new Date(e * 1000).toISOString(); } return f; };
+    const endpoints = [
+      "/dlg/auth/b2b/seller/refresh", "/dlg/auth/b2b/refresh", "/dlg/auth/b2b/seller/refresh-token",
+      "/dlg/auth/b2b/seller/token/refresh", "/dlg/auth/b2b/token/refresh", "/dlg/auth/b2b/seller/refresh_token",
+      "/dlg/auth/b2b/seller/access-token", "/dlg/auth/b2b/seller/renew",
+    ];
+    const placements = [
+      { tag: "Bearer", h: { Authorization: "Bearer " + refreshTok }, b: null },
+      { tag: "cookie-GET", h: {}, b: null, get: true },
+      { tag: "x-refresh-token", h: { "x-refresh-token": refreshTok }, b: {} },
+      { tag: "body.refresh_token", h: {}, b: { refresh_token: refreshTok } },
+      { tag: "body.token", h: {}, b: { token: refreshTok } },
+    ];
+    const results = [];
+    for (const ep of endpoints) {
+      for (const pl of placements) {
+        let status = 0, fresh = null, snippet = "", err = "";
+        try {
+          const opt = { method: pl.get ? "GET" : "POST", headers: { ...H, ...pl.h } };
+          if (!pl.get) { opt.headers["content-type"] = "application/json"; opt.body = JSON.stringify(pl.b || {}); }
+          const res = await fetch(base + ep, opt);
+          status = res.status;
+          const txt = await res.text();
+          fresh = scanFresh(res.headers.get("set-cookie"), txt);
+          snippet = txt.slice(0, 100);
+        } catch (e) { err = String(e).slice(0, 50); }
+        results.push({ ep, via: pl.tag, status, freshToken: fresh, snippet, err });
+        if (fresh) break;
+      }
+      if (results[results.length - 1].freshToken) break;
+    }
+    const win = results.find((r) => r.freshToken);
+    // non-404, non-401 bhi dikhao (clue de sakte hain)
+    const interesting = results.filter((r) => r.status !== 404 && r.status !== 401);
+    return Response.json({ found: win || null, interesting, totalTried: results.length });
   }
   if (p === "/api/ai-test") {
     if (!env.AI) return Response.json({ ok: false, reason: "env.AI binding missing" });
@@ -733,7 +823,10 @@ async function updateProductOOS(env, productID, isOos) {
     updated_by: email, request_source: "B2B_EXTERNAL",
     data: { seller: env.SELLER_ID || "anagh", productID: Number(productID), updates: [{ key: "is_oos", value: !!isOos }], warehouse_id: Number(env.WAREHOUSE_ID) || 1534 },
   });
-  const ok = !!j && !/error/i.test(j.status || "");
+  // Portal ka apna response hi authoritative: {"status":"OK","data":{"message":"Product details updated successfully"}}
+  // (Alag se dubara padhna false-negative deta tha — warehouse view me propagation delay hota hai.)
+  const msg = (j && (j.data?.message || j.status)) || "";
+  const ok = !!j && (String(j.status).toUpperCase() === "OK" || /updated|success/i.test(msg)) && !/error|fail/i.test(String(j.status || ""));
   const nm = (await env.DB.prepare("SELECT name,sku FROM inventory WHERE product_id=?").bind(String(productID)).first());
   const label = (nm && (nm.name || nm.sku)) || String(productID);
   await env.DB.prepare("INSERT INTO events(ts,type,title) VALUES(?,?,?)")
@@ -1031,6 +1124,21 @@ function placedDay(s, now) {
 // ---------------- Fast lane: seedhe gateway API se real-time new orders ----------------
 const GW_ORDERS = "/dlg/auth/v1/b2b/get_orders";
 
+// State ke access-token ka exp (sabse jaldi expire hone wala JWT = access token).
+// Anti-clobber me purane vs naye state ki freshness compare karne ke liye.
+function accessExpFromState(stateStr) {
+  if (!stateStr) return null;
+  const jwtExp = (val) => { try { const pr = String(val).split("."); if (pr.length !== 3) return null; let b = pr[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "="; const pl = JSON.parse(atob(b)); return pl && pl.exp ? pl.exp : null; } catch (_) { return null; } };
+  let values = [];
+  const s = String(stateStr).trim();
+  if (s.startsWith("{")) {
+    try { const st = JSON.parse(s); if (Array.isArray(st.cookies)) values = st.cookies.filter((c) => (c.domain || "").includes("kirana.club")).map((c) => c.value); } catch (_) {}
+  } else {
+    values = s.replace(/^cookie:\s*/i, "").split(/;\s*/).map((kv) => kv.slice(kv.indexOf("=") + 1));
+  }
+  const exps = values.map(jwtExp).filter((e) => e != null);
+  return exps.length ? Math.min(...exps) : null;
+}
 function cookieHeaderFromState(stateStr) {
   if (!stateStr) return null;
   stateStr = stateStr.trim();
@@ -1546,21 +1654,58 @@ async function askBotRules(env, q) {
   return "Main exact jawab de sakta hoon:\n• \"kal kitne orders aaye\", \"parso ki sale\", \"is hafte kitne order\"\n• \"in-transit ki total value\", \"NDR orders\", \"sabse bada order\"\n• \"Meat Masala ka stock\", \"kya low stock hai\", \"top product\"";
 }
 
-async function gwPost(env, path, body) {
+// PERMANENT AUTO-REFRESH: access token (~1h) expire hone par refresh token se naya mint karo.
+// Endpoint confirmed: POST /dlg/auth/b2b/refresh with Authorization: Bearer <refresh_token>.
+let _refreshInflight = null;
+async function refreshAccessToken(env) {
+  if (_refreshInflight) return _refreshInflight;
+  _refreshInflight = (async () => {
+    try {
+      const rawState = await getSetting(env, "KC_STATE");
+      if (!rawState) return false;
+      const jwtExp = (val) => { try { const pr = String(val).split("."); if (pr.length !== 3) return null; let b = pr[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "="; const pl = JSON.parse(atob(b)); return pl && pl.exp ? pl.exp : null; } catch (_) { return null; } };
+      const nowSec = Math.floor(Date.now() / 1000);
+      let st = null; try { st = JSON.parse(rawState); } catch (_) {}
+      let pairs = [];
+      if (st && Array.isArray(st.cookies)) pairs = st.cookies.filter((c) => (c.domain || "").includes("kirana.club")).map((c) => [c.name, c.value]);
+      else pairs = String(rawState).replace(/^cookie:\s*/i, "").split(/;\s*/).map((kv) => { const i = kv.indexOf("="); return [kv.slice(0, i).trim(), kv.slice(i + 1)]; });
+      // refresh token = sabse der tak valid (future, max-exp) kirana.club JWT cookie
+      let refreshTok = null, refreshExp = -1;
+      for (const [, v] of pairs) { const e = jwtExp(v); if (e && e > nowSec && e > refreshExp) { refreshTok = v; refreshExp = e; } }
+      if (!refreshTok) return false;
+      const cookie = cookieHeaderFromState(rawState);
+      const base = env.GW_BASE || "https://gateway.kirana.club";
+      const res = await fetch(base + "/dlg/auth/b2b/refresh", { method: "POST", headers: { ...GW_HEADERS, Authorization: "Bearer " + refreshTok, cookie }, body: "{}" });
+      if (res.status !== 200) return false;
+      const jar = new Map(); readSetCookies(res, jar);
+      if (!jar.size) return false;
+      // merge: purane cookies + naye (override). Cookie-string me save (dono format support).
+      const cur = new Map(pairs.filter(([n]) => n).map(([n, v]) => [n, v]));
+      for (const [n, v] of jar) cur.set(n, v);
+      const merged = [...cur.entries()].map(([n, v]) => `${n}=${v}`).join("; ");
+      await setSetting(env, "KC_STATE", merged);
+      await setSetting(env, "GW_COOKIE", merged);
+      await setSetting(env, "failing", "");
+      return true;
+    } catch (_) { return false; } finally { _refreshInflight = null; }
+  })();
+  return _refreshInflight;
+}
+
+async function gwPost(env, path, body, _retried) {
   const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
   if (!cookie) return null;
   const base = env.GW_BASE || "https://gateway.kirana.club";
   try {
     const res = await fetch(base + path, {
       method: "POST",
-      headers: {
-        "content-type": "application/json", accept: "application/json, text/plain, */*",
-        origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        cookie,
-      },
+      headers: { ...GW_HEADERS, cookie },
       body: JSON.stringify(body),
     });
+    if (res.status === 401 && !_retried) {
+      // token expire — refresh karke ek baar retry (self-heal)
+      if (await refreshAccessToken(env)) return gwPost(env, path, body, true);
+    }
     if (res.status !== 200) return null;
     return await res.json();
   } catch (_) { return null; }
@@ -1616,6 +1761,11 @@ const isQuiet = (ts) => istMinutes(ts) < 7 * 60 + 30;
 async function cronTick(env) {
   const now = Date.now();
   if (isQuiet(now)) return; // raat: silent
+
+  // TOKEN KEEP-ALIVE: access token ~1h me expire hota hai — expiry se pehle hi refresh kar lo,
+  // taaki fast lane/write kabhi 401 na kare. (refresh endpoint confirmed, Bearer refresh token)
+  const accExp = accessExpFromState(await getSetting(env, "KC_STATE"));
+  if (accExp != null && accExp < Math.floor(now / 1000) + 600) await refreshAccessToken(env).catch(() => {});
 
   // FAST LANE: har tick (5 min) seedhe API se new order check — real-time alert
   await directNewOrderPoll(env).catch(() => {});
