@@ -154,6 +154,184 @@ async function route(req, env) {
     const edits = (je?.data?.edits || []).filter((e) => ids.includes(e.product_id));
     return Response.json({ products: prods, edits });
   }
+  if (p === "/api/oos-debug") {
+    // Portal OOS write ka ASLI response dekho (status + body) — kyun fail ho raha hai.
+    // ?q=chicken  -> sirf product list (read-only, portal change nahi)
+    // ?q=chicken&to=oos|instock -> us product par write karke RAW response dikhata hai
+    const q = (url.searchParams.get("q") || "chicken").toLowerCase();
+    const to = (url.searchParams.get("to") || "").toLowerCase();
+    const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+    const cookieInfo = { present: !!cookie, len: cookie ? cookie.length : 0 };
+    const base0 = env.GW_BASE || "https://gateway.kirana.club";
+    // RAW get_products — HTTP status + body dekho (401=cookie expire, 200-empty=payload/endpoint change)
+    const rawGet = async (body) => {
+      let status = 0, text = "", err = "";
+      try {
+        const res = await fetch(base0 + "/dlg/auth/v1/b2b/get_products", {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json, text/plain, */*",
+            origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", cookie },
+          body: JSON.stringify(body),
+        });
+        status = res.status; text = (await res.text()).slice(0, 700);
+      } catch (e) { err = String(e); }
+      return { httpStatus: status, bodyStart: text, fetchError: err };
+    };
+    const rawNoWh = await rawGet({ source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true } } });
+    // DONO tareeke se get_products: warehouse_id 1534 ke saath, aur bina — kaun data deta hai dekho
+    const withWh = await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true }, warehouse_id: Number(env.WAREHOUSE_ID) || 1534 } });
+    const noWh = await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true } } });
+    const counts = { with_warehouse_1534: (withWh?.data?.products || []).length, without_warehouse: (noWh?.data?.products || []).length, rawNoWh };
+    const dataKeys = noWh?.data ? Object.keys(noWh.data) : [];
+    const prodsRaw = (noWh?.data?.products || []).filter((pr) => String(pr.name || "").toLowerCase().includes(q));
+    const matched = prodsRaw.map((pr) => ({ id: pr.id, name: pr.name, sku: pr.sku_code, is_oos: pr.is_oos, warehouse_id: pr.warehouse_id, warehouse: pr.warehouse, whKeys: Object.keys(pr).filter((k) => /wareh|whse|store|location/i.test(k)) }));
+    const firstFull = prodsRaw[0] || null; // pura product object — warehouse_id kahan hai dekhne ke liye
+    let write = null;
+    if (to === "oos" || to === "instock") {
+      const target = prodsRaw[0];
+      if (!target) return Response.json({ cookieInfo, counts, dataKeys, matched, error: "koi product match nahi hua" });
+      const isOos = to === "oos";
+      const base = env.GW_BASE || "https://gateway.kirana.club";
+      const email = (await getSetting(env, "seller_email")) || env.SELLER_EMAIL || "anaghmasala@gmail.com";
+      const doWrite = async (whVal) => {
+        const data = { seller: env.SELLER_ID || "anagh", productID: Number(target.id), updates: [{ key: "is_oos", value: isOos }] };
+        if (whVal != null) data.warehouse_id = whVal;
+        let status = 0, bodyText = "", err = "";
+        try {
+          const res = await fetch(base + "/dlg/auth/v1/b2b/update_product_details", {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json, text/plain, */*",
+              origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/",
+              "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", cookie },
+            body: JSON.stringify({ updated_by: email, request_source: "B2B_EXTERNAL", data }),
+          });
+          status = res.status; bodyText = (await res.text()).slice(0, 1200);
+        } catch (e) { err = String(e); }
+        return { warehouse_id_sent: whVal === undefined ? "(omitted)" : whVal, httpStatus: status, responseBody: bodyText, fetchError: err };
+      };
+      const tryNoWh = await doWrite(undefined);         // bina warehouse_id
+      const tryProdWh = target.warehouse_id != null ? await doWrite(Number(target.warehouse_id)) : null; // product ka apna warehouse_id
+      // write ke baad dubara padho (bina warehouse_id, jo working read path hai)
+      const after = (noWh?.data?.products ? (await gwPost(env, "/dlg/auth/v1/b2b/get_products", { source: "B2B_EXTERNAL", data: { filters: { sellers: [], show_merged: true } } }))?.data?.products : [])?.find((pr) => pr.id === target.id);
+      write = { targetId: target.id, targetName: target.name, tryNoWh, tryProdWh, is_oos_after: after ? after.is_oos : "?" };
+    }
+    return Response.json({ cookieInfo, counts, dataKeys, matched, firstFull, write });
+  }
+  if (p === "/api/state-debug") {
+    // Token kahan rehta hai + kab expire — koi secret VALUE output nahi, sirf naam+exp
+    const raw = await getSetting(env, "KC_STATE");
+    const jwtExp = (val) => {
+      try {
+        const parts = String(val).split(".");
+        if (parts.length !== 3) return null;
+        let b = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        while (b.length % 4) b += "=";
+        const payload = JSON.parse(atob(b));
+        return payload && payload.exp ? payload.exp : null;
+      } catch (_) { return null; }
+    };
+    const nowSec = Math.floor(Date.now() / 1000);
+    let st; try { st = JSON.parse(raw || "{}"); } catch (_) { st = {}; }
+    const cookies = (st.cookies || []).map((c) => {
+      const exp = jwtExp(c.value);
+      return { name: c.name, domain: c.domain, cookie_expires: c.expires && c.expires > 0 ? new Date(c.expires * 1000).toISOString() : "session", looks_jwt: exp != null, jwt_exp: exp ? new Date(exp * 1000).toISOString() : null, jwt_expired: exp ? exp < nowSec : null, jwt_age_min: exp ? Math.round((nowSec - exp) / 60) : null };
+    });
+    const localStorage = [];
+    for (const o of (st.origins || [])) {
+      for (const it of (o.localStorage || [])) {
+        const exp = jwtExp(it.value);
+        localStorage.push({ origin: o.origin, key: it.name, looks_jwt: exp != null, jwt_exp: exp ? new Date(exp * 1000).toISOString() : null, jwt_expired: exp ? exp < nowSec : null });
+      }
+    }
+    return Response.json({ cookieCount: cookies.length, cookies, localStorageCount: localStorage.length, localStorage });
+  }
+  if (p === "/api/refresh-debug") {
+    // Refresh token valid hai — kaunsa endpoint naya access token deta hai, probe karo.
+    const cookie = (await getSetting(env, "GW_COOKIE")) || cookieHeaderFromState(await getSetting(env, "KC_STATE"));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const jwtExp = (val) => { try { const pr = String(val).split("."); if (pr.length !== 3) return null; let b = pr[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "="; const pl = JSON.parse(atob(b)); return pl && pl.exp ? pl.exp : null; } catch (_) { return null; } };
+    const scanCookies = (sc) => { // Set-Cookie me naya future-dated JWT dhoondo (sirf exp report)
+      if (!sc) return null;
+      const found = [];
+      for (const m of sc.matchAll(/([A-Za-z0-9\-_]+)=([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)/g)) {
+        const exp = jwtExp(m[2]); if (exp) found.push({ name: m[1], exp: new Date(exp * 1000).toISOString(), future: exp > nowSec });
+      }
+      return found.length ? found : null;
+    };
+    const base = env.GW_BASE || "https://gateway.kirana.club";
+    const H = { accept: "application/json, text/plain, */*", origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", cookie };
+    const candidates = [
+      ["GET", "https://supplier.kirana.club/api/auth/session", null],
+      ["POST", base + "/dlg/auth/v1/refresh", {}],
+      ["POST", base + "/dlg/auth/v1/token/refresh", {}],
+      ["POST", base + "/dlg/auth/v1/b2b/refresh", {}],
+      ["POST", base + "/dlg/auth/v1/refresh_token", {}],
+      ["POST", base + "/dlg/auth/v1/b2b/refresh_token", {}],
+      ["GET", base + "/dlg/auth/v1/refresh", null],
+    ];
+    const results = [];
+    for (const [method, u, body] of candidates) {
+      let status = 0, setCookie = null, bodyTokenExp = null, bodyHasToken = false, snippet = "", err = "";
+      try {
+        const res = await fetch(u, { method, headers: body != null ? { ...H, "content-type": "application/json" } : H, body: body != null ? JSON.stringify(body) : undefined });
+        status = res.status;
+        setCookie = scanCookies(res.headers.get("set-cookie"));
+        const txt = await res.text();
+        snippet = txt.slice(0, 160);
+        try { const j = JSON.parse(txt); const s = JSON.stringify(j); for (const m of s.matchAll(/([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)/g)) { const e = jwtExp(m[1]); if (e) { bodyHasToken = true; if (e > nowSec) bodyTokenExp = new Date(e * 1000).toISOString(); } } } catch (_) {}
+      } catch (e) { err = String(e).slice(0, 80); }
+      results.push({ endpoint: `${method} ${u.replace(base, "").replace("https://supplier.kirana.club", "")}`, status, newCookieToken: setCookie, bodyHasToken, bodyFreshTokenExp: bodyTokenExp, snippet, err });
+    }
+    return Response.json({ note: "status 200 + newCookieToken.future=true YA bodyFreshTokenExp set = yahi refresh endpoint hai", results });
+  }
+  if (p === "/api/refresh-debug2") {
+    // Refresh token ko alag-alag jagah bhej ke dekho kaunsa 200 + naya access token deta hai
+    const raw = await getSetting(env, "KC_STATE");
+    let st; try { st = JSON.parse(raw || "{}"); } catch (_) { st = {}; }
+    const nowSec = Math.floor(Date.now() / 1000);
+    const jwtExp = (val) => { try { const pr = String(val).split("."); if (pr.length !== 3) return null; let b = pr[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "="; const pl = JSON.parse(atob(b)); return pl && pl.exp ? pl.exp : null; } catch (_) { return null; } };
+    // kirana.club JWT cookies: future-exp = refresh, past-exp = access
+    const jwtCookies = (st.cookies || []).filter((c) => (c.domain || "").includes("kirana.club") && jwtExp(c.value) != null);
+    let refreshTok = null, refreshExp = -1, accessTok = null;
+    for (const c of jwtCookies) { const e = jwtExp(c.value); if (e > nowSec && e > refreshExp) { refreshTok = c.value; refreshExp = e; } if (e < nowSec) accessTok = c.value; }
+    if (!refreshTok) return Response.json({ error: "koi valid refresh token nahi mila state me" });
+    const cookie = cookieHeaderFromState(raw);
+    const base = env.GW_BASE || "https://gateway.kirana.club";
+    const H = { accept: "application/json, text/plain, */*", origin: "https://supplier.kirana.club", referer: "https://supplier.kirana.club/", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", cookie };
+    const scanFresh = (sc, txt) => {
+      const out = { cookie: null, body: null };
+      if (sc) for (const m of sc.matchAll(/([A-Za-z0-9\-_]+)=([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)/g)) { const e = jwtExp(m[2]); if (e && e > nowSec) out.cookie = new Date(e * 1000).toISOString(); }
+      if (txt) for (const m of txt.matchAll(/([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)/g)) { const e = jwtExp(m[1]); if (e && e > nowSec) out.body = new Date(e * 1000).toISOString(); }
+      return (out.cookie || out.body) ? out : null;
+    };
+    const endpoints = [base + "/dlg/auth/v1/refresh", base + "/dlg/auth/v1/token/refresh", base + "/dlg/auth/v1/refresh_token"];
+    const placements = [
+      { tag: "Bearer", headers: { Authorization: "Bearer " + refreshTok }, body: {} },
+      { tag: "x-refresh-token", headers: { "x-refresh-token": refreshTok }, body: {} },
+      { tag: "body.refresh_token", headers: {}, body: { refresh_token: refreshTok } },
+      { tag: "body.refreshToken", headers: {}, body: { refreshToken: refreshTok } },
+      { tag: "body.token", headers: {}, body: { token: refreshTok } },
+      { tag: "body.data.refresh_token", headers: {}, body: { data: { refresh_token: refreshTok } } },
+    ];
+    const results = [];
+    for (const ep of endpoints) {
+      for (const pl of placements) {
+        let status = 0, fresh = null, snippet = "", err = "";
+        try {
+          const res = await fetch(ep, { method: "POST", headers: { ...H, ...pl.headers, "content-type": "application/json" }, body: JSON.stringify(pl.body) });
+          status = res.status;
+          const txt = await res.text();
+          fresh = scanFresh(res.headers.get("set-cookie"), txt);
+          snippet = txt.slice(0, 120);
+        } catch (e) { err = String(e).slice(0, 60); }
+        results.push({ ep: ep.replace(base, ""), via: pl.tag, status, freshToken: fresh, snippet, err });
+        if (fresh) break; // mil gaya
+      }
+    }
+    const win = results.find((r) => r.freshToken);
+    return Response.json({ found: win || null, all: results });
+  }
   if (p === "/api/ai-test") {
     if (!env.AI) return Response.json({ ok: false, reason: "env.AI binding missing" });
     const models = [env.AI_MODEL, "@cf/meta/llama-3.1-8b-instruct-fp8", "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/mistralai/mistral-small-3.1-24b-instruct", "@cf/meta/llama-3.2-3b-instruct"].filter(Boolean);
