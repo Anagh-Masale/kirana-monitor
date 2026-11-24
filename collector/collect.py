@@ -254,7 +254,7 @@ def main():
         LAST_PAGE["page"] = page
         try:
             metrics = {}
-            for attempt in range(2):  # 2 try: dusri baar page reload
+            for attempt in range(3):  # 3 try: overview numbers Kirana ki taraf se flaky ho sakte hain
                 if attempt == 0:
                     page.goto(OVERVIEW_URL, wait_until="domcontentloaded", timeout=90000)
                 else:
@@ -263,12 +263,15 @@ def main():
                 if is_login(page):
                     api("/api/ingest", {"error": "Kirana Club ne login page dikhaya (session expire).", "error_code": "SESSION"})
                     print("login page"); browser.close(); return
-                metrics = wait_metrics(page, 60)
+                metrics = wait_metrics(page, 90)
                 if "This Month Sales" in metrics:
                     break
             if "This Month Sales" not in metrics:
-                grab_shot()
-                raise RuntimeError("Overview ke numbers 2 try (2 min) mein load nahi hue. " + page_debug(page))
+                # Overview numbers nahi aaye (Kirana ki taraf se slow/flaky) — ye CRITICAL nahi hai.
+                # Poora run fail MAT karo: orders list hi asli data hai. Metrics khaali chhod do,
+                # Worker pichhle good numbers carry-forward kar lega. Sirf chup-chaap log, koi error mail nahi.
+                print("warn: overview numbers load nahi hue — metrics skip, orders phir bhi le rahe hain")
+                metrics = {}
 
             counts = {}
             for attempt in range(2):

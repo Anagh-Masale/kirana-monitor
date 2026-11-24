@@ -346,6 +346,12 @@ async function processSnapshot(env, snap, source) {
   const prevCounts = prev ? JSON.parse(prev.status_counts || "{}") : {};
   const prevOrderCount = prev ? prev.order_count || 0 : 0;
 
+  // Overview numbers na aaye (collector ne khaali metrics bheja) to pichhle good metrics rakho —
+  // KPI cards aur average blank na ho, aur jhoothe "metric change" diff na banein.
+  if (Object.keys(metrics).length === 0 && !firstRun) {
+    for (const [k, v] of Object.entries(prevMetrics)) metrics[k] = v;
+  }
+
   // Glitch guard: orders/counts kabhi ek saath 0 par nahi aate agar pehle data tha.
   // Aisa tabhi hota hai jab page theek se load na ho. Reject: na diff, na notification,
   // na purana data overwrite. Pichhle good numbers carry-forward, dashboard green rehta hai.
