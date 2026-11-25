@@ -177,8 +177,22 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .mbadge{margin-left:auto;background:var(--bad);color:#fff;font-size:11px;font-weight:800;min-width:20px;height:20px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
 .sbadge{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;vertical-align:middle}
 .sbadge.oos{background:var(--bad-bg);color:var(--bad)}.sbadge.low{background:var(--warn-bg);color:var(--warn)}.sbadge.ok{background:var(--good-bg);color:var(--good)}.sbadge.untr{background:var(--mute-bg);color:var(--mute)}
-.srow{border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:12px;background:var(--card);max-width:880px}
-.srow.oos{border-color:#E5C0B9;background:#FDF4F2}.srow.low{border-color:#EAD6AE;background:#FDF8EE}
+.srow{border:1px solid var(--line);border-radius:14px;margin-bottom:10px;background:var(--card);max-width:880px;overflow:hidden}
+.srow.oos{border-color:#E5C0B9}.srow.low{border-color:#EAD6AE}
+.srow.act{border-left:3px solid var(--warn)}
+.shead{cursor:pointer;display:flex;flex-direction:column;gap:7px;padding:14px 16px;user-select:none}
+.shead:hover{background:#FCFAF6}
+.sh-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:15px;line-height:1.3}
+.sh-top b{font-weight:700}
+.sh-sum{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);font-weight:600;flex-wrap:wrap}
+.sh-sum .u{color:var(--ink);font-weight:800;font-variant-numeric:tabular-nums}
+.actflag{color:var(--warn);font-weight:800}
+.chev{margin-left:auto;font-size:13px;color:var(--muted);transition:transform .2s ease;flex-shrink:0}
+.srow.open .chev{transform:rotate(180deg)}
+.sbody{display:none;padding:0 16px 16px;border-top:1px solid var(--line)}
+.srow.open .sbody{display:block;padding-top:14px}
+.stocktop{position:sticky;top:54px;z-index:20;background:var(--bg);padding:8px 0 10px;margin-bottom:6px;max-width:880px}
+.stocktop:after{content:"";position:absolute;left:0;right:0;bottom:0;height:10px;background:linear-gradient(var(--bg),transparent);pointer-events:none}
 .sname{font-size:15px;margin-bottom:13px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .sctrl{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 .sctrl label{display:flex;flex-direction:column;font-size:11px;color:var(--muted);font-weight:700;gap:4px}
@@ -200,8 +214,10 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .sfilters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;max-width:880px}
 .ssearch{flex:1;min-width:180px;font:inherit;font-size:14px;padding:10px 13px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
 .ssearch:focus{outline:none;border-color:var(--accent)}
-.schips{display:flex;gap:7px;flex-wrap:wrap}
-.schip{padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap}
+.schips{display:flex;gap:7px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+.schips::-webkit-scrollbar{display:none}
+.schip{padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;flex-shrink:0}
+.schip b{font-variant-numeric:tabular-nums;margin-left:4px;font-weight:800}
 .schip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .srow3{display:flex;gap:10px;align-items:flex-end;margin-top:12px}
 .tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--mute-bg);color:var(--muted);font-size:10px;font-weight:800;font-style:italic;cursor:pointer;vertical-align:middle;margin-left:3px}
@@ -212,6 +228,46 @@ footer{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex
 .declare{margin:8px 0 2px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:7px 10px;border-radius:9px;line-height:1.4}
 .linkold{margin:9px 0 2px;font-size:12.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#F4EEE4;border:1px dashed var(--line);padding:9px 11px;border-radius:10px}
 .linkold select{flex:1;min-width:150px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:12.5px}
+.srow.combo{border-color:#CBB89A}
+.combotag{font-size:9.5px;font-weight:800;letter-spacing:.5px;background:var(--gold);color:#fff;padding:2px 7px;border-radius:5px;margin-right:2px}
+.combobd{background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin-bottom:12px;font-size:13px}
+.cbrow{display:flex;justify-content:space-between;gap:10px;padding:4px 0;color:var(--muted)}
+.cbrow b{color:var(--ink);font-weight:700}
+.cbrow.blk b,.cbrow.blk span{color:var(--bad)}
+.cbrow.untr .cwarn{color:var(--warn);font-weight:700}
+.cbtot{margin-top:7px;padding-top:8px;border-top:1px solid var(--line);font-size:13px;color:var(--ink);font-weight:600}
+.cbtot b{color:var(--accent-dark);font-weight:800}
+.cwarn{color:var(--bad);font-weight:700}
+.comboedit{background:#FBF6EC;border:1px dashed var(--gold);border-radius:11px;padding:11px 13px;margin-bottom:12px}
+.celabel{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px}
+.crows{display:flex;flex-direction:column;gap:7px;margin-bottom:9px}
+.crow{display:flex;align-items:center;gap:7px;font-size:13px}
+.crow .c-comp{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12.5px}
+.crow .c-pcs{width:58px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;text-align:center}
+.crow .cx{color:var(--muted);font-weight:700}.crow .cu{color:var(--muted);font-size:11.5px}
+.crow .crm{padding:5px 9px;color:var(--bad)}
+.incombo{background:var(--info-bg);color:#2A3C8A;border-radius:10px;padding:8px 11px;font-size:12.5px;line-height:1.45;margin-bottom:10px}
+.incombochip{font-size:11px;font-weight:700;color:var(--info);background:var(--info-bg);padding:2px 7px;border-radius:999px}
+.combotoggle{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.combotoggle .suggest{border-color:var(--gold);color:var(--accent-dark);background:var(--warn-bg)}
+.sctrl.one,.sctrl.two{grid-template-columns:1fr}
+@media(min-width:620px){.sctrl.two{grid-template-columns:1fr 1fr}.sctrl.one{max-width:260px}}
+.cardgen{max-width:620px}
+.ctypes{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}
+.ctype{font:inherit;font-size:13.5px;font-weight:600;padding:9px 14px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer}
+.ctype.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.cardform{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px}
+@media(max-width:560px){.cardform{grid-template-columns:1fr}}
+.cfl{display:flex;flex-direction:column;font-size:12px;color:var(--muted);font-weight:700;gap:5px}
+.cfl input{font:inherit;font-size:14px;font-weight:500;color:var(--ink);padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.cardblock{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}
+.cbh{font-size:13px;font-weight:800;margin-bottom:8px}
+.pdfbtns{display:flex;gap:8px;flex-wrap:wrap}
+.logorow{display:flex;align-items:center;gap:14px}
+.logobox{width:92px;height:92px;border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;flex:0 0 auto}
+.logobox img{max-width:100%;max-height:100%}
+.logoacts{display:flex;flex-direction:column;gap:8px}
+.btn.mini.danger{color:var(--bad);border-color:var(--bad)}
 @media(max-width:620px){.srow{padding:14px}.sctrl{grid-template-columns:1fr 1fr;gap:10px}.sched{margin-left:0;width:100%}.sched input{width:100%}}
 .up{color:var(--good)}.down{color:var(--bad)}
 .rsum{display:flex;align-items:center;gap:16px;margin-bottom:8px}.rsum .big{font-size:40px;font-weight:800;line-height:1}
@@ -345,7 +401,7 @@ function fmtISO(s){if(!s)return"";var m=/(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\
 function toggleMenu(open){var m=document.getElementById("menu");if(m)m.classList[open?"add":"remove"]("show");}
 function showSec(s){document.querySelectorAll(".sec").forEach(function(e){e.classList.toggle("on",e.id==="sec-"+s);});
   document.querySelectorAll(".menu .panel a").forEach(function(a){a.classList.toggle("on",a.dataset.sec===s);});
-  try{localStorage.setItem("kcsec",s);}catch(_){}toggleMenu(0);window.scrollTo(0,0);}
+  try{localStorage.setItem("kcsec",s);}catch(_){}toggleMenu(0);window.scrollTo(0,0);if(s==="cards"&&typeof loadAssetsForCards==="function")loadAssetsForCards();}
 function filterOrders(el,st){document.querySelectorAll("#sec-orders .fchip").forEach(function(c){c.classList.toggle("on",c===el);});
   document.querySelectorAll("#obody tr").forEach(function(r){r.style.display=(!st||r.dataset.st===st)?"":"none";});}
 try{var _s=localStorage.getItem("kcsec");if(_s&&document.getElementById("sec-"+_s))showSec(_s);}catch(_){}
@@ -369,7 +425,9 @@ var kcChatSeeded=false;
 function toggleChat(){var p=document.getElementById("chatpanel"),f=document.getElementById("fab"),tip=document.getElementById("fabtip");
  var open=!p.classList.contains("show");p.classList.toggle("show",open);f.classList.toggle("open",open);f.textContent=open?"×":"🤖";
  if(tip)tip.classList.remove("show");
- if(open&&!kcChatSeeded){kcChatSeeded=true;addChat("bot","Namaste! 🤖 Main aapke orders ke baare mein turant bata sakta hoon:\\n\\n• Kaunse order NDR / RTO / Cancelled / In Transit / Delivered hain\\n• Aaj ki ya total sale kitni hui\\n• Top chalne wala product kaunsa hai\\n• Kya out of stock hai\\n\\nBas type karke poochhiye, jaise: \\"kaunse order NDR hue\\" ya \\"aaj ki sale\\".");}
+ if(open&&!kcChatSeeded){kcChatSeeded=true;var h=(window.KC&&window.KC.chatHist)||[];
+  if(h.length){h.forEach(function(m){addChat(m.r==="assistant"?"bot":"me",m.c);});}
+  else{addChat("bot","Namaste! 🤖 Main aapke business ka poora data dekhkar madad karta hoon — ek cofounder/CMO ki tarah:\\n\\n• Orders, sale, NDR/RTO, return sabse zyada kahan\\n• Kya out of stock, kaunsa product slow\\n• \\"Sale kaise badhaun\\" — concrete plan\\n\\nBaat yaad rehti hai (24 ghante), to aise poochho jaise dost se — \\"wo kaunsa tha\\", \\"aur batao\\" sab chalega.");}}
  if(open)setTimeout(function(){var i=document.getElementById("chatin");if(i)i.focus();},120);}
 try{setTimeout(function(){var t=document.getElementById("fabtip"),p=document.getElementById("chatpanel");
  if(t&&p&&!p.classList.contains("show")){t.classList.add("show");setTimeout(function(){t.classList.remove("show");},5500);}},1400);}catch(_){}
@@ -383,12 +441,115 @@ var tipT;function tipToggle(el){document.querySelectorAll(".tip.open").forEach(f
 var stFilter="all";
 function stChip(el,f){stFilter=f;document.querySelectorAll(".schip").forEach(function(c){c.classList.remove("on");});el.classList.add("on");filterStock();}
 function filterStock(){var si=document.getElementById("ssearch");var q=(si&&si.value||"").toLowerCase().trim();
- document.querySelectorAll("#stocklist .srow").forEach(function(r){var nm=r.dataset.name||"";var st=r.dataset.st||"";
-  var ok=(!q||nm.indexOf(q)>=0)&&(stFilter==="all"||st===stFilter);r.style.display=ok?"":"none";});}
+ document.querySelectorAll("#stocklist .srow").forEach(function(r){var nm=r.dataset.name||"";var st=r.dataset.st||"";var fo=true;
+  if(stFilter==="healthy")fo=(st==="in_stock");
+  else if(stFilter==="low")fo=(st==="low");
+  else if(stFilter==="oos")fo=(st==="oos");
+  else if(stFilter==="mismatch")fo=(r.dataset.mismatch==="1");
+  else if(stFilter==="action")fo=(r.dataset.action==="1");
+  else if(stFilter==="combo")fo=(r.dataset.combo==="1");
+  else if(stFilter==="incombo")fo=(r.dataset.incombo==="1");
+  var ok=(!q||nm.indexOf(q)>=0)&&fo;r.style.display=ok?"":"none";});}
+function toggleSrow(h){if(h&&h.parentElement)h.parentElement.classList.toggle("open");}
 async function saveStock(btn){var r=sRow(btn),o=btn.textContent;btn.textContent="…";
- var body={product_id:r.dataset.pid,units:+r.querySelector(".in-units").value,per_bundle:+r.querySelector(".in-pb").value,threshold:+r.querySelector(".in-thr").value,min_qty:+r.querySelector(".in-min").value,tracking:r.querySelector(".in-track").checked,auto_oos:r.querySelector(".in-auto").checked};
+ var g=function(s){return r.querySelector(s);};var body={product_id:r.dataset.pid};
+ if(g(".in-units"))body.units=+g(".in-units").value;
+ if(g(".in-pb"))body.per_bundle=+g(".in-pb").value;
+ if(g(".in-thr"))body.threshold=+g(".in-thr").value;
+ if(g(".in-min"))body.min_qty=+g(".in-min").value;
+ if(g(".in-track")&&!g(".in-track").disabled)body.tracking=g(".in-track").checked;
+ if(g(".in-auto"))body.auto_oos=g(".in-auto").checked;
  try{var j=await (await fetch("/api/stock/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)})).json();
   toast("✅ Stock save"+(j&&j.portal&&j.portal.ok?" + portal update":""),"",false);setTimeout(function(){location.reload();},700);}catch(e){btn.textContent=o;}}
+function makeCombo(b){var e=b.parentElement.querySelector(".comboedit");if(e)e.style.display=(e.style.display==="none"?"":"none");}
+function addCRow(b){var ed=b.closest(".comboedit"),rows=ed.querySelector(".crows");var c=rows.firstElementChild.cloneNode(true);var s=c.querySelector(".c-comp");if(s)s.value="";var p=c.querySelector(".c-pcs");if(p)p.value=1;rows.appendChild(c);}
+function rmCRow(b){var rows=b.closest(".crows");if(rows.children.length>1)b.closest(".crow").remove();else{var s=b.closest(".crow").querySelector(".c-comp");if(s)s.value="";}}
+async function saveCombo(b){var r=sRow(b),ed=b.closest(".comboedit"),comps=[];
+ ed.querySelectorAll(".crow").forEach(function(row){var cid=row.querySelector(".c-comp").value,pcs=+row.querySelector(".c-pcs").value;if(cid&&pcs>0)comps.push({component_id:cid,pcs:pcs});});
+ if(!comps.length){alert("Kam se kam ek product add karo");return;}
+ var o=b.textContent;b.textContent="…";
+ try{var j=await (await fetch("/api/stock/combo",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({combo_id:r.dataset.pid,is_combo:true,components:comps})})).json();
+  if(j&&j.ok){toast("🧩 Combo save"+(j.needSetup?" — kuch component ka stock declare karo":" — "+j.avail+" combo ban sakte"),"",false);setTimeout(function(){location.reload();},800);}else{b.textContent=o;toast("Combo save fail","",false);}}catch(e){b.textContent=o;}}
+async function unCombo(b){if(!confirm("Is combo ka mapping hata dein? (har product ka apna stock waise hi rahega)"))return;var r=sRow(b);
+ try{await fetch("/api/stock/combo",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({combo_id:r.dataset.pid,is_combo:false,components:[]})});toast("Combo hat gaya","",false);setTimeout(function(){location.reload();},700);}catch(e){}}
+
+/* ===== Gift card generator ===== */
+var cardCurType="thanks";
+function cardType(b,t){cardCurType=t;document.querySelectorAll(".ctype").forEach(function(e){e.classList.toggle("on",e.dataset.ct===t);});}
+function cfv(id){var e=document.getElementById(id);return e?e.value.trim():"";}
+function buildPrompt(){
+ var gift=cfv("cf-gift"),gifthi=cfv("cf-gifthi"),mo=cfv("cf-minorder")||"2000",wa=cfv("cf-wa")||"77399 61284";var p;
+ if(cardCurType==="thanks"){
+  p='Design a premium, print-ready gift note card for an Indian spice brand "Anagh Masale". Landscape 3:2 (printed on the TOP HALF of an A4 page), single side.\\n\\nSTYLE: warm festive premium Indian look. Deep green (#1f5f3a) main, saffron/orange (#d97a00) + cream accents. Subtle whole spices (cardamom, cinnamon, star anise, red chillies) and light rangoli/mandala at corners; keep centre clean. A small gift box with ribbon and 10 masala sachets as the main illustration. Clean bold highly readable fonts; Hindi in clear Devanagari, NO spelling mistakes, text sharp.\\n\\nTEXT (use exactly, in order):\\nTop heading: Thank You for Your Repeat Order!\\n'+'\\u0926\\u094b\\u092c\\u093e\\u0930\\u093e \\u0911\\u0930\\u094d\\u0921\\u0930 \\u0915\\u0930\\u0928\\u0947 \\u0915\\u0947 \\u0932\\u093f\\u090f \\u0927\\u0928\\u094d\\u092f\\u0935\\u093e\\u0926!\\nMiddle (gift highlight, inside a ribbon/badge, most eye-catching):\\nYour FREE Gift / \\u0906\\u092a\\u0915\\u093e FREE \\u0917\\u093f\\u092b\\u094d\\u091f\\n'+gift+'\\n'+gifthi+'\\nLine below gift: A small thank-you for trusting Anagh Masale and ordering above \\u20b9'+mo+'. / \\u20b9'+mo+' \\u0938\\u0947 \\u090a\\u092a\\u0930 \\u0915\\u093e \\u0911\\u0930\\u094d\\u0921\\u0930 \\u0915\\u0930\\u0928\\u0947 \\u0914\\u0930 \\u0905\\u0928\\u0918 \\u092e\\u0938\\u093e\\u0932\\u0947 \\u092a\\u0930 \\u092d\\u0930\\u094b\\u0938\\u093e \\u0915\\u0930\\u0928\\u0947 \\u0915\\u0947 \\u0932\\u093f\\u090f \\u090f\\u0915 \\u091b\\u094b\\u091f\\u093e \\u0938\\u093e \\u0924\\u094b\\u0939\\u092b\\u093c\\u093e\\u0964\\nBottom: Keep ordering on Kirana Club. More gifts on your next big order! / Kirana Club \\u092a\\u0930 \\u0911\\u0930\\u094d\\u0921\\u0930 \\u0915\\u0930\\u0924\\u0947 \\u0930\\u0939\\u093f\\u090f\\u0964\\nFooter: Anagh Masale | Muzaffarpur, Bihar | WhatsApp: '+wa+'\\n\\nRULES: no other text/logos/watermarks. 8-10mm clean margin all sides. High resolution, print-ready.';
+ }else{
+  p='Design ONE print-ready landscape thank-you + rating-steps card for an Indian spice brand "Anagh Masale". A5 landscape 210x148mm, keep all text/important elements 10mm inside edges. Single side.\\n\\nSTYLE: warm premium village-friendly flat vector, high contrast, large bold readable text (bold sans supporting Devanagari like Mukta/Hind). Colours deep green #1F5C3A, cream #FFF6E3, turmeric #F5A31A, dark brown text #3B2314. Subtle whole-spice illustrations only along corners/edges, never behind text.\\n\\nLAYOUT:\\n1) Top green band: empty white circle top-left for logo (leave blank). Hindi headline \\u0927\\u0928\\u094d\\u092f\\u0935\\u093e\\u0926! \\u0906\\u092a\\u0928\\u0947 Anagh \\u092e\\u0938\\u093e\\u0932\\u093e \\u091a\\u0941\\u0928\\u093e + small English \"Thank you for choosing Anagh Masala\".\\n2) Turmeric strip: \\u0905\\u0917\\u0932\\u0947 \\u092a\\u093e\\u0930\\u094d\\u0938\\u0932 \\u092e\\u0947\\u0902 \\u092a\\u093e\\u090f\\u0902 FREE \\u0917\\u093f\\u092b\\u094d\\u091f \\u092a\\u0948\\u0915 / Get a FREE gift pack in your next parcel.\\n3) Four step cards (icons star, video, whatsapp, parcel; badges 1-4), Hindi large + English small:\\n 1. Kirana Club \\u0910\\u092a \\u092e\\u0947\\u0902 \\u0938\\u091a\\u094d\\u091a\\u0940 \\u0930\\u0947\\u091f\\u093f\\u0902\\u0917 \\u0926\\u0947\\u0902 / Give an honest rating on Kirana Club\\n 2. Kirana Club \\u092a\\u0930 20-30 \\u0938\\u0947\\u0915\\u0902\\u0921 \\u0915\\u093e \\u0935\\u0940\\u0921\\u093f\\u092f\\u094b \\u0921\\u093e\\u0932\\u0947\\u0902 / Post a 20-30 sec video\\n 3. \\u0938\\u094d\\u0915\\u094d\\u0930\\u0940\\u0928\\u0936\\u0949\\u091f WhatsApp \\u0915\\u0930\\u0947\\u0902: '+wa+' / WhatsApp the screenshot\\n 4. \\u0905\\u0917\\u0932\\u093e \\u0911\\u0930\\u094d\\u0921\\u0930 \\u20b9'+mo+'+ \\u0915\\u0930\\u0947\\u0902, Order ID \\u092d\\u0947\\u091c\\u0947\\u0902 / Next order \\u20b9'+mo+'+, send the Order ID\\n4) Green footer: empty white square bottom-right for QR (leave blank) with \"WhatsApp: '+wa+'\" under it; left cream \"Anagh Masale | Taste the Purity, Feel the Tradition\". Tiny: One gift per order | Valid on \\u20b9'+mo+'+ order within 30 days | While stocks last.\\n\\nRULES: render all quoted text EXACTLY, correct Devanagari, no lorem. Do NOT draw any logo/QR (leave blanks). No photos of people. 300 DPI print quality.';
+ }
+ var ta=document.getElementById("cf-prompt");ta.value=p;ta.style.display="";document.getElementById("cf-copy").style.display="";}
+function copyPrompt(){var ta=document.getElementById("cf-prompt");ta.select();try{navigator.clipboard.writeText(ta.value);toast("📋 Prompt copy ho gaya","ChatGPT me paste karo",false);}catch(e){document.execCommand&&document.execCommand("copy");}}
+function setActiveCard(dataUrl,w,h,label){window._cardImg={data:dataUrl,w:w,h:h};var pv=document.getElementById("cf-preview");if(pv){pv.src=dataUrl;pv.style.display="";}var am=document.getElementById("cf-activemsg");if(am)am.textContent="✅ Active: "+(label||"card")+" — ab neeche PDF nikaalo.";}
+function loadCardImg(input){var f=input.files&&input.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(e){var im=new Image();im.onload=function(){setActiveCard(e.target.result,im.width,im.height,"ChatGPT image");};im.src=e.target.result;};rd.readAsDataURL(f);}
+
+/* ---- Persistent assets (logo) ---- */
+function downscale(dataUrl,maxDim,cb){var im=new Image();im.onload=function(){var w=im.width,h=im.height,s=Math.min(1,maxDim/Math.max(w,h));if(s<1){w=Math.round(w*s);h=Math.round(h*s);}var c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(im,0,0,w,h);var out=c.toDataURL("image/png");cb(out,w,h);};im.src=dataUrl;}
+async function uploadAsset(slot,input){var f=input.files&&input.files[0];if(!f)return;var msg=document.getElementById("cf-logomsg");msg.textContent="Upload ho raha…";var rd=new FileReader();rd.onload=function(e){downscale(e.target.result,slot==="logo"?700:1400,async function(data,w,h){try{var r=await fetch("/api/asset/set",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({slot:slot,mime:"image/png",data:data,w:w,h:h})});var j=await r.json();if(!j.ok){msg.textContent=j.error==="too_big"?"⚠️ Image bahut badi — chhoti image try karo.":"⚠️ Save fail.";return;}showLogo(data);msg.textContent="✅ Save ho gaya (hamesha ke liye).";}catch(err){msg.textContent="⚠️ Network error.";}});};rd.readAsDataURL(f);input.value="";}
+async function delAsset(slot){if(!confirm("Logo hata dein? Purana DB se delete ho jaayega."))return;var msg=document.getElementById("cf-logomsg");try{await fetch("/api/asset/del",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({slot:slot})});window._logo=null;showLogo(null);msg.textContent="Logo hat gaya.";}catch(e){msg.textContent="⚠️ Fail.";}}
+function showLogo(data){window._logo=data||null;var img=document.getElementById("cf-logoimg"),emp=document.getElementById("cf-logoempty"),del=document.getElementById("cf-logodel");if(!img)return;if(data){img.src=data;img.style.display="";emp.style.display="none";del.style.display="";}else{img.style.display="none";emp.style.display="";del.style.display="none";}}
+async function loadAssetsForCards(){if(window._assetsLoaded)return;window._assetsLoaded=true;try{var r=await fetch("/api/asset/get?slot=logo");if(r.ok){var j=await r.json();if(j.data)showLogo(j.data);}}catch(e){}}
+
+/* ---- Option A: free canvas template ---- */
+function wrapText(ctx,text,x,y,maxW,lh){var words=(text||"").split(" "),line="",yy=y;for(var i=0;i<words.length;i++){var t=line+words[i]+" ";if(ctx.measureText(t).width>maxW&&line){ctx.fillText(line.trim(),x,yy);line=words[i]+" ";yy+=lh;}else line=t;}if(line)ctx.fillText(line.trim(),x,yy);return yy;}
+function drawLogoOn(ctx,cx,cy,r,cb){if(window._logo){var im=new Image();im.onload=function(){var s=Math.min(2*r/im.width,2*r/im.height);var w=im.width*s,h=im.height*s;ctx.drawImage(im,cx-w/2,cy-h/2,w,h);cb&&cb();};im.onerror=function(){cb&&cb();};im.src=window._logo;}else{cb&&cb();}}
+function renderTemplate(){
+ var gift=cfv("cf-gift"),gifthi=cfv("cf-gifthi"),mo=cfv("cf-minorder")||"2000",wa=cfv("cf-wa")||"77399 61284";
+ var W=1500,H=1000,c=document.getElementById("cf-canvas");c.width=W;c.height=H;var x=c.getContext("2d");
+ x.fillStyle="#1f5c3a";x.fillRect(0,0,W,H);
+ x.fillStyle="#fff6e3";x.fillRect(40,40,W-80,H-80);
+ x.fillStyle="#1f5c3a";x.fillRect(40,40,W-80,170);
+ x.textBaseline="middle";
+ var doText=function(){
+  x.fillStyle="#fff6e3";x.textAlign="left";x.font="bold 52px 'Mukta',system-ui,sans-serif";
+  x.fillText(window._logo?"":"Anagh Masale",window._logo?300:90,125);
+  x.textAlign="center";
+  if(cardCurType==="thanks"){
+   x.fillStyle="#1f5c3a";x.font="bold 60px 'Mukta',system-ui,sans-serif";x.fillText("Thank You for Your Repeat Order!",W/2,290);
+   x.font="bold 46px 'Mukta',system-ui,sans-serif";x.fillText("दोबारा ऑर्डर करने के लिए धन्यवाद!",W/2,360);
+   x.fillStyle="#f5a31a";x.fillRect(W/2-430,430,860,230);
+   x.fillStyle="#3b2314";x.font="bold 40px 'Mukta',system-ui,sans-serif";x.fillText("🎁 Your FREE Gift / आपका FREE गिफ्ट",W/2,480);
+   x.fillStyle="#1f5c3a";x.font="bold 46px 'Mukta',system-ui,sans-serif";x.fillText(gift,W/2,545);
+   x.font="bold 40px 'Mukta',system-ui,sans-serif";x.fillText(gifthi,W/2,605);
+   x.fillStyle="#3b2314";x.font="30px 'Mukta',system-ui,sans-serif";
+   wrapText(x,"₹"+mo+" se upar order karne aur Anagh Masale par bharosa karne ke liye ek chhota sa tohfa.",W/2,720,W-260,42);
+   x.font="bold 30px 'Mukta',system-ui,sans-serif";x.fillText("Kirana Club par order karte rahiye — next bade order par aur gifts!",W/2,820);
+  }else{
+   x.fillStyle="#1f5c3a";x.font="bold 52px 'Mukta',system-ui,sans-serif";x.fillText("धन्यवाद! आपने Anagh मसाला चुना",W/2,285);
+   x.fillStyle="#f5a31a";x.fillRect(90,335,W-180,70);x.fillStyle="#3b2314";x.font="bold 34px 'Mukta',system-ui,sans-serif";x.fillText("अगले पार्सल में पाएं FREE गिफ्ट पैक 🎁",W/2,370);
+   var steps=["1. Kirana Club ऐप में सच्ची रेटिंग दें","2. 20-30 सेकंड का वीडियो डालें","3. स्क्रीनशॉट WhatsApp करें: "+wa,"4. अगला ऑर्डर ₹"+mo+"+ करें, Order ID भेजें"];
+   x.textAlign="left";x.fillStyle="#3b2314";x.font="34px 'Mukta',system-ui,sans-serif";
+   for(var i=0;i<4;i++){var yy=470+i*95;x.fillStyle="#1f5c3a";x.beginPath();x.arc(130,yy,34,0,7);x.fill();x.fillStyle="#fff6e3";x.textAlign="center";x.font="bold 34px 'Mukta',sans-serif";x.fillText(String(i+1),130,yy+2);x.fillStyle="#3b2314";x.textAlign="left";x.font="34px 'Mukta',sans-serif";x.fillText(steps[i],185,yy+2);}
+   x.textAlign="center";x.fillStyle="#6b5"; x.font="22px 'Mukta',sans-serif";x.fillText("One gift per order · ₹"+mo+"+ order · 30 days ke andar · While stocks last",W/2,880);
+  }
+  x.fillStyle="#1f5c3a";x.fillRect(40,H-110,W-80,70);x.fillStyle="#fff6e3";x.font="bold 30px 'Mukta',sans-serif";x.textAlign="center";x.fillText("Anagh Masale · Muzaffarpur, Bihar · WhatsApp: "+wa,W/2,H-75);
+  setActiveCard(c.toDataURL("image/png"),W,H,cardCurType==="thanks"?"Free template (Thank-you)":"Free template (Rating)");
+  document.getElementById("cf-pdfmsg").textContent="";
+ };
+ if(window._logo)drawLogoOn(x,170,125,60,doText);else doText();
+}
+function loadJsPDF(){return new Promise(function(res,rej){if(window.jspdf&&window.jspdf.jsPDF){res();return;}var s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";s.onload=function(){res();};s.onerror=function(){rej();};document.head.appendChild(s);});}
+async function makePdf(mode){
+ var msg=document.getElementById("cf-pdfmsg");
+ if(!window._cardImg){msg.textContent="⚠️ Pehle image upload karo.";return;}
+ msg.textContent="PDF ban raha…";
+ try{await loadJsPDF();}catch(e){msg.textContent="⚠️ PDF library load nahi hui (internet check karo).";return;}
+ var JS=window.jspdf.jsPDF;var img=window._cardImg;var ar=img.w/img.h;
+ var fmt=img.data.indexOf("image/png")>=0?"PNG":"JPEG";
+ function fit(cw,ch){var w=cw,h=cw/ar;if(h>ch){h=ch;w=ch*ar;}return{w:w,h:h};}
+ var doc=new JS({orientation:"portrait",unit:"mm",format:"a4"}),name;
+ function cell(cols,rowsN,pad){var cellW=210/cols,cellH=297/rowsN;for(var r=0;r<rowsN;r++)for(var c=0;c<cols;c++){var x=c*cellW,y=r*cellH;var fp=fit(cellW-2*pad,cellH-2*pad);doc.addImage(img.data,fmt,x+(cellW-fp.w)/2,y+(cellH-fp.h)/2,fp.w,fp.h);}return{cellW:cellW,cellH:cellH};}
+ function cutlines(cols,rowsN,cellW,cellH){doc.setDrawColor(170);doc.setLineWidth(0.2);if(doc.setLineDashPattern)doc.setLineDashPattern([2,2],0);for(var c=1;c<cols;c++)doc.line(c*cellW,0,c*cellW,297);for(var r=1;r<rowsN;r++)doc.line(0,r*cellH,210,r*cellH);}
+ if(mode==="tophalf"){var m=8,f=fit(210-2*m,148-2*m);doc.addImage(img.data,fmt,(210-f.w)/2,m,f.w,f.h);doc.setDrawColor(200);if(doc.setLineDashPattern)doc.setLineDashPattern([2,2],0);doc.line(0,148.5,210,148.5);name="anagh_card_tophalf.pdf";}
+ else if(mode==="8"){var g=cell(2,4,3);cutlines(2,4,g.cellW,g.cellH);name="anagh_card_8up.pdf";}
+ else{var g2=cell(2,2,4);cutlines(2,2,g2.cellW,g2.cellH);name="anagh_card_4up.pdf";}
+ doc.save(name);msg.textContent="✅ "+name+" download ho gaya.";}
 async function linkOld(btn){var r=sRow(btn),sel=r.querySelector(".in-link"),from=sel&&sel.value;
  if(!from){alert("Pehle purana product chuniye");return;}
  var nm=sel.options[sel.selectedIndex].text;
@@ -548,50 +709,126 @@ function suggView(d, lang) {
 }
 function tip(msg) { return `<span class="tip" onclick="tipToggle(this)">i<span class="tipbub">${esc(msg)}</span></span>`; }
 function stockView(d, t) {
-  const rows = ((d.inventory && d.inventory.rows) || []).filter((r) => r.status !== "discontinued");
-  const discList = ((d.inventory && d.inventory.rows) || []).filter((r) => r.status === "discontinued");
+  const allRows = (d.inventory && d.inventory.rows) || [];
+  const rows = allRows.filter((r) => r.status !== "discontinued" && r.status !== "merged");
+  const normN = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const activeNames = new Set(rows.map((r) => normN(r.name)));
+  // link dropdown: sirf wo discontinued jinka active same-naam version NAHI hai (superseded ko chhupao) (#1)
+  const discList = allRows.filter((r) => r.status === "discontinued" && !activeNames.has(normN(r.name)));
   if (!rows.length) return `<div class="empty">Abhi koi product nahi mila. Niche dabaiye — aapke portal catalog se poori product list aa jayegi, phir har product ki units set kar dijiye.</div>
     <button class="btn" style="margin-top:12px" onclick="discoverStock(this)">↺ Portal se products laao</button>`;
   const badge = (s) => s === "oos" ? `<span class="sbadge oos">OUT OF STOCK</span>` : s === "low" ? `<span class="sbadge low">LOW</span>` : `<span class="sbadge ok">In stock</span>`;
-  const cnt = (f) => rows.filter((r) => (r.tracking ? r.status : (Number(r.portal_oos) ? "oos" : "in_stock")) === f).length;
-  const header = `<div class="stoprow">
-    <input class="ssearch" id="ssearch" placeholder="🔍 Product dhoondo…" oninput="filterStock()" autocomplete="off">
-    <button class="btn" onclick="discoverStock(this)">↺ Portal se sync</button></div>
-    <div class="schips">
-      <span class="schip on" data-f="all" onclick="stChip(this,'all')">Sabhi ${rows.length}</span>
-      <span class="schip" data-f="in_stock" onclick="stChip(this,'in_stock')">In stock ${cnt("in_stock")}</span>
-      <span class="schip" data-f="low" onclick="stChip(this,'low')">Low ${cnt("low")}</span>
-      <span class="schip" data-f="oos" onclick="stChip(this,'oos')">OOS ${cnt("oos")}</span>
-    </div>`;
-  const list = rows.map((r) => {
-    const pb = Number(r.per_bundle) || 0;
-    const bundleInfo = pb ? `<span class="bundleline">= ${Math.floor(r.units / pb)} bundle + ${r.units % pb} pcs</span>` : "";
+  const meta = (r) => {
     const portalOos = Number(r.portal_oos) === 1;
     const effSt = r.tracking ? r.status : (portalOos ? "oos" : "in_stock");
     const mismatch = r.tracking && ((r.status === "oos" && !portalOos) || (r.status !== "oos" && portalOos && Number(r.units) > 0));
-    const declareNeed = r.status !== "discontinued" && !portalOos && (!r.tracking || Number(r.units) <= 0);
-    const disc = r.status === "discontinued";
-    return `<div class="srow ${disc ? "disc" : r.tracking ? r.status : ""}" data-pid="${esc(r.product_id)}" data-name="${esc((r.name || r.sku || "").toLowerCase())}" data-st="${disc ? "discontinued" : effSt}">
-    <div class="sname"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.sku ? `<span class="skucode">${esc(r.sku)}</span>` : ""}${disc ? `<span class="sbadge disc">Discontinued</span>` : r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`}
-      ${disc ? "" : `<span class="sbadge ${portalOos ? "oos" : "ok"}">Portal: ${portalOos ? "OOS" : "In stock"}</span>${mismatch ? `<span class="sbadge warn">⚠ mismatch</span>` : ""}`}</div>
-    ${declareNeed ? `<div class="declare">Portal par IN STOCK hai par yahan stock declare nahi — units bhariye warna order aayega aur track nahi hoga.</div>` : ""}
-    ${(!disc && !r.tracking && Number(r.units) === 0 && !pb && discList.length) ? `<div class="linkold">🔗 Naya SKU? Purane product ka stock yahan le aao:
-      <select class="in-link"><option value="">— purana product chuno —</option>${discList.map((o) => `<option value="${esc(o.product_id)}">${esc(o.name || o.sku || o.product_id)}${o.sku ? ` (${esc(o.sku)})` : ""} · ${Number(o.units) || 0} pcs</option>`).join("")}</select>
-      <button class="btn mini" onclick="linkOld(this)">Link karo</button></div>` : ""}
-    <div class="sctrl">
-      <label>Units bache (pcs) ${tip("Abhi kitne single pieces/sachet bache hain. Order aate hi apne aap ghatega.")}<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
-      <label>Pcs per bundle ${tip("1 packet/bundle me kitne pcs (jaise 20). Bundles isi se dikhega. Khaali/0 = sirf pcs.")}<input type="number" class="in-pb" value="${pb}" min="0" inputmode="numeric"></label>
-      <label>Alert &lt;= ${tip("Units itne ya kam hote hi LOW alert jata hai.")}<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label>
-      <label>Min order qty ${tip("1 order me kitne pcs jaate hain — portal se auto aata hai. Portal pe badlo to yahan apne aap update.")}<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric" readonly></label>
+    const declareNeed = !portalOos && (!r.tracking || Number(r.units) <= 0);
+    return { portalOos, effSt, mismatch, declareNeed, action: declareNeed || mismatch };
+  };
+  const C = { healthy: 0, low: 0, oos: 0, mismatch: 0, action: 0, combo: 0, incombo: 0 };
+  rows.forEach((r) => {
+    if (Number(r.is_combo)) {
+      C.combo++;
+      const ci = r._combo;
+      if (ci && !ci.needSetup) { if (ci.avail <= 0) C.oos++; else if (ci.avail <= (Number(r.threshold) || 0)) C.low++; else C.healthy++; }
+      if (!ci || ci.needSetup || ci.avail <= 0) C.action++;
+    } else {
+      const m = meta(r);
+      if (m.effSt === "in_stock") C.healthy++; else if (m.effSt === "low") C.low++; else if (m.effSt === "oos") C.oos++;
+      if (m.mismatch) C.mismatch++; if (m.action) C.action++;
+    }
+    if (r._inCombos) C.incombo++;
+  });
+  const chip = (f, label, n) => `<span class="schip${f === "all" ? " on" : ""}" data-f="${f}" onclick="stChip(this,'${f}')">${label} <b>${n}</b></span>`;
+  const header = `<div class="stocktop">
+    <div class="stoprow">
+      <input class="ssearch" id="ssearch" placeholder="🔍 Product dhoondo…" oninput="filterStock()" autocomplete="off">
+      <button class="btn" onclick="discoverStock(this)">↺ Portal se sync</button></div>
+    <div class="schips">${chip("all", "Sabhi", rows.length)}${chip("healthy", "✅ Healthy", C.healthy)}${chip("low", "⚠️ Low", C.low)}${chip("oos", "⛔ OOS", C.oos)}${chip("combo", "🧩 Combo", C.combo)}${chip("incombo", "🔗 In-combo", C.incombo)}${chip("mismatch", "🔀 Mismatch", C.mismatch)}${chip("action", "🔔 Action", C.action)}</div></div>`;
+  // combo mapping ke liye: components = saare non-combo products
+  const comboOpts = rows.filter((x) => !Number(x.is_combo));
+  const optTags = (sel) => comboOpts.map((o) => `<option value="${esc(o.product_id)}"${String(sel) === String(o.product_id) ? " selected" : ""}>${esc(o.name || o.sku || o.product_id)}</option>`).join("");
+  const compRow = (cid, pcs) => `<div class="crow"><select class="c-comp"><option value="">— product chuno —</option>${optTags(cid)}</select><span class="cx">×</span><input type="number" class="c-pcs" value="${pcs || 1}" min="1" inputmode="numeric"><span class="cu">pcs</span><button class="btn mini ghost crm" onclick="rmCRow(this)">✕</button></div>`;
+  const recipeEditor = (comps) => `<div class="comboedit">
+      <div class="celabel">Combo me kaunse products — aur per combo kitne pcs:</div>
+      <div class="crows">${(comps && comps.length ? comps.map((c) => compRow(c.id, c.pcs)) : [compRow("", 1)]).join("")}</div>
+      <div><button class="btn mini ghost" onclick="addCRow(this)">+ product jodo</button>
+      <button class="btn mini" onclick="saveCombo(this)">Combo save</button></div></div>`;
+
+  const list = rows.map((r) => {
+    const pb = Number(r.per_bundle) || 0;
+    // ========== COMBO card ==========
+    if (Number(r.is_combo) === 1) {
+      const ci = r._combo || { avail: 0, components: [], blockers: [], needSetup: true };
+      const need = ci.needSetup, avail = ci.avail;
+      const portalOos = Number(r.portal_oos) === 1;
+      const effSt = need ? "in_stock" : (avail <= 0 ? "oos" : (avail <= (Number(r.threshold) || 0) ? "low" : "in_stock"));
+      const blk = (ci.blockers || []).map((b) => b.name);
+      const statusPill = need ? `<span class="sbadge untr">Setup</span>` : badge(effSt);
+      const action = need || avail <= 0;
+      const sumText = need ? `⚠️ Components set karein` : `<span class="u">${avail}</span> combo ban sakte${avail <= 0 && blk.length ? ` · ${esc(blk[0])} OOS` : ""}`;
+      const bd = ci.components.length ? `<div class="combobd">${ci.components.map((c) => `<div class="cbrow${!c.tracked ? " untr" : (avail <= 0 && c.makes <= avail ? " blk" : "")}"><span>${esc(c.name)}</span>${c.tracked ? `<span><b>${c.units}</b> ÷ ${c.pcs} = <b>${c.makes}</b></span>` : `<span class="cwarn">stock declare karein</span>`}</div>`).join("")}<div class="cbtot">${need ? "Kuch component ka stock declare nahi — combo calculate nahi ho paa raha." : `Ban sakte: <b>${avail}</b> combo${avail <= 0 && blk.length ? ` — <span class="cwarn">${esc(blk.join(", "))} OOS, isliye combo OOS</span>` : ""}`}</div></div>` : "";
+      return `<div class="srow combo ${effSt}${action ? " act" : ""}" data-pid="${esc(r.product_id)}" data-name="${esc((r.name || r.sku || "").toLowerCase())}" data-st="${effSt}" data-mismatch="0" data-action="${action ? 1 : 0}" data-combo="1">
+      <div class="shead" onclick="toggleSrow(this)">
+        <div class="sh-top"><span class="combotag">COMBO</span><b>${esc(r.name || r.sku || r.product_id)}</b>${r.sku ? `<span class="skucode">${esc(r.sku)}</span>` : ""}${statusPill}<span class="sbadge ${portalOos ? "oos" : "ok"}">Portal: ${portalOos ? "OOS" : "In stock"}</span></div>
+        <div class="sh-sum">${sumText}${action ? `<span class="actflag">🔔 dhyan</span>` : ""}<span class="chev">▾</span></div>
+      </div>
+      <div class="sbody">
+        ${bd}
+        ${recipeEditor(ci.components)}
+        <div class="sctrl one"><label>Alert ≤ (combos) ${tip("Itne ya kam combo ban sakein to LOW alert.")}<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label></div>
+        <div class="srow2">
+          <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-sync ${tip("Component OOS → combo portal par bhi OOS, aur wapas aane par in-stock.")}</label>
+          <button class="btn mini" onclick="saveStock(this)">Save</button>
+          <button class="btn mini ghost" onclick="unCombo(this)">Combo hatao</button>
+        </div>
+      </div>
+    </div>`;
+    }
+    // ========== regular product card ==========
+    const m = meta(r);
+    const bundleInfo = pb ? `<span class="bundleline">= ${Math.floor(r.units / pb)} bundle + ${r.units % pb} pcs</span>` : "";
+    const statusPill = r.tracking ? badge(r.status) : `<span class="sbadge untr">Track off</span>`;
+    const sum = [];
+    if (r.tracking) { sum.push(`<span class="u">${r.units}</span> pcs`); if (pb) sum.push(`${Math.floor(r.units / pb)} bundle`); sum.push(`alert ≤${r.threshold}`); }
+    else sum.push(`Track off — set up karein`);
+    const nm = (r.name || "").toLowerCase();
+    const looksCombo = /combo|pack of \d|\bpack\b/.test(nm);
+    return `<div class="srow ${m.effSt}${m.action ? " act" : ""}" data-pid="${esc(r.product_id)}" data-name="${esc((r.name || r.sku || "").toLowerCase())}" data-st="${m.effSt}" data-mismatch="${m.mismatch ? 1 : 0}" data-action="${m.action ? 1 : 0}" data-incombo="${r._inCombos ? 1 : 0}">
+    <div class="shead" onclick="toggleSrow(this)">
+      <div class="sh-top"><b>${esc(r.name || r.sku || r.product_id)}</b>${r.sku ? `<span class="skucode">${esc(r.sku)}</span>` : ""}${statusPill}<span class="sbadge ${m.portalOos ? "oos" : "ok"}">Portal: ${m.portalOos ? "OOS" : "In stock"}</span>${m.mismatch ? `<span class="sbadge warn">⚠ mismatch</span>` : ""}</div>
+      <div class="sh-sum">${sum.join(" · ")}${r._inCombos ? `<span class="incombochip">🧩 combo me</span>` : ""}${m.action ? `<span class="actflag">🔔 action chahiye</span>` : ""}<span class="chev">▾</span></div>
     </div>
-    ${bundleInfo ? `<div class="bundlerow">${bundleInfo}</div>` : ""}
-    <div class="srow2">
-      <label class="chk"><input type="checkbox" class="in-track" ${r.tracking ? "checked" : ""}> Track ${tip("On = is product ka stock track karo aur order par ghatao.")}</label>
-      <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-sync ${tip("On = stock 0 hote hi portal par OOS, aur stock aate hi wapas IN STOCK — apne aap.")}</label>
-      <button class="btn mini" onclick="saveStock(this)">Save</button>
-      ${portalOos ? `<button class="btn mini ghost" onclick="markInStock(this)">Portal IN-STOCK karo</button>` : `<button class="btn mini ghost" onclick="markOOSNow(this)">Portal OOS karo</button>`}
+    <div class="sbody">
+      ${r._inCombos && r._inCombos.length ? `<div class="incombo">🧩 Ye product in combos ka hissa hai: <b>${r._inCombos.map(esc).join(", ")}</b> — iska stock ghate to wo combo bhi update hota hai.</div>` : ""}
+      ${m.declareNeed ? `<div class="declare">Portal par IN STOCK hai par yahan stock declare nahi — units bhariye warna order aayega aur track nahi hoga.</div>` : ""}
+      ${(!r.tracking && Number(r.units) === 0 && !pb && discList.length) ? `<div class="linkold">🔗 Naya SKU? Purane product ka stock yahan le aao:
+        <select class="in-link"><option value="">— purana product chuno —</option>${discList.map((o) => `<option value="${esc(o.product_id)}">${esc(o.name || o.sku || o.product_id)}${o.sku ? ` (${esc(o.sku)})` : ""} · ${Number(o.units) || 0} pcs</option>`).join("")}</select>
+        <button class="btn mini" onclick="linkOld(this)">Link karo</button></div>` : ""}
+      <div class="sctrl">
+        <label>Units bache (pcs) ${tip("Abhi kitne single pieces/sachet bache hain. Order aate hi apne aap ghatega.")}<input type="number" class="in-units" value="${r.units}" min="0" inputmode="numeric"></label>
+        <label>Pcs per bundle ${tip("1 packet/bundle me kitne pcs (jaise 20). Bundles isi se dikhega. Khaali/0 = sirf pcs.")}<input type="number" class="in-pb" value="${pb}" min="0" inputmode="numeric"></label>
+        <label>Alert &lt;= ${tip("Units itne ya kam hote hi LOW alert jata hai.")}<input type="number" class="in-thr" value="${r.threshold}" min="0" inputmode="numeric"></label>
+        <label>Min order qty ${tip("1 order me kitne pcs jaate hain — portal se auto aata hai. Portal pe badlo to yahan apne aap update.")}<input type="number" class="in-min" value="${r.min_qty}" min="1" inputmode="numeric" readonly></label>
+      </div>
+      ${bundleInfo ? `<div class="bundlerow">${bundleInfo}</div>` : ""}
+      <div class="srow2">
+        <label class="chk"><input type="checkbox" class="in-track" ${r.tracking ? "checked" : ""}> Track ${tip("On = is product ka stock track karo aur order par ghatao.")}</label>
+        <label class="chk"><input type="checkbox" class="in-auto" ${r.auto_oos ? "checked" : ""}> Auto-sync ${tip("On = stock 0 hote hi portal par OOS, aur stock aate hi wapas IN STOCK — apne aap.")}</label>
+        <button class="btn mini" onclick="saveStock(this)">Save</button>
+        ${m.portalOos ? `<button class="btn mini ghost" onclick="markInStock(this)">Portal IN-STOCK karo</button>` : `<button class="btn mini ghost" onclick="markOOSNow(this)">Portal OOS karo</button>`}
+      </div>
+      <div class="srow3"><label class="sched">Schedule OOS ${tip("Is date/time par apne aap portal par OOS ho jayega.")}<input type="datetime-local" class="in-when"></label><button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button></div>
+      <div class="combotoggle">
+        <button class="btn mini ghost ${looksCombo ? "suggest" : ""}" onclick="makeCombo(this)">🧩 ${looksCombo ? "Lagta hai ye combo pack hai — components map karo" : "Ye combo pack hai? Components map karo"}</button>
+        <div class="comboedit" style="display:none">
+          <div class="celabel">Combo me kaunse products — aur per combo kitne pcs:</div>
+          <div class="crows">${compRow("", 1)}</div>
+          <div><button class="btn mini ghost" onclick="addCRow(this)">+ product jodo</button>
+          <button class="btn mini" onclick="saveCombo(this)">Combo save</button></div>
+        </div>
+      </div>
     </div>
-    <div class="srow3"><label class="sched">Schedule OOS ${tip("Is date/time par apne aap portal par OOS ho jayega.")}<input type="datetime-local" class="in-when"></label><button class="btn mini ghost" onclick="scheduleOOS(this)">Set</button></div>
   </div>`;
   }).join("");
   return `<div class="sub" style="margin-bottom:12px">${t("stockSub")}</div>${header}<div id="stocklist">${list}</div>`;
@@ -601,6 +838,67 @@ function stars(n) {
   n = Math.round(Number(n) || 0);
   return `<span class="stars">${"★".repeat(n)}${"☆".repeat(5 - n)}</span>`;
 }
+function cardsView() {
+  const f = (id, label, val, type) => `<label class="cfl">${label}<input id="${id}" ${type === "num" ? 'type="number"' : ""} value="${esc(val)}"></label>`;
+  return `<div class="card cardgen">
+    <div class="cardblock" style="margin-top:0">
+      <div class="cbh">🏷️ Brand logo (ek baar upload — hamesha save)</div>
+      <div class="sub" style="margin-bottom:8px">Logo template card me apne aap lag jaayega. Replace/remove karne par purana DB se delete ho jaata hai.</div>
+      <div class="logorow">
+        <div class="logobox" id="cf-logobox"><span id="cf-logoempty" class="sub">No logo</span><img id="cf-logoimg" style="display:none"></div>
+        <div class="logoacts">
+          <label class="btn mini">⬆️ Upload / Replace<input type="file" accept="image/*" onchange="uploadAsset('logo',this)" style="display:none"></label>
+          <button class="btn mini danger" id="cf-logodel" onclick="delAsset('logo')" style="display:none">🗑️ Remove</button>
+        </div>
+      </div>
+      <div class="sub" id="cf-logomsg" style="margin-top:6px"></div>
+    </div>
+
+    <div class="ctypes">
+      <button class="ctype on" data-ct="thanks" onclick="cardType(this,'thanks')">🙏 Thank-you + Free Gift</button>
+      <button class="ctype" data-ct="rating" onclick="cardType(this,'rating')">⭐ Rating steps</button>
+    </div>
+    <div class="cardform" id="cardform">
+      ${f("cf-gift", "Free gift (English)", "10 pcs Anagh Meat Masala (₹10 pack)")}
+      ${f("cf-gifthi", "Free gift (हिंदी)", "10 पैकेट अनघ मीट मसाला (₹10 वाला)")}
+      ${f("cf-minorder", "Min order ₹", "2000", "num")}
+      ${f("cf-wa", "WhatsApp", "77399 61284")}
+    </div>
+
+    <div class="cardblock">
+      <div class="cbh">Option A — free template (bina ChatGPT, turant)</div>
+      <div class="sub" style="margin-bottom:8px">Form bhar ke preview banao — logo + text se card browser me hi ban jaayega. Phir neeche PDF nikaalo.</div>
+      <button class="btn mini" onclick="renderTemplate()">🎨 Template preview banao</button>
+    </div>
+
+    <div class="cardblock">
+      <div class="cbh">Option B — ChatGPT se image banwao (best quality)</div>
+      <div class="sub" style="margin-bottom:8px">Prompt bana ke copy karo → ChatGPT me daalo → image download karke neeche upload karo.</div>
+      <button class="btn mini" onclick="buildPrompt()">📝 Prompt banao</button>
+      <button class="btn mini ghost" id="cf-copy" onclick="copyPrompt()" style="display:none">📋 Copy</button>
+      <textarea id="cf-prompt" rows="7" readonly style="display:none;width:100%;margin-top:9px;font:12px ui-monospace,monospace;padding:10px;border:1px solid var(--line);border-radius:10px"></textarea>
+      <div style="margin-top:10px"><input type="file" id="cf-img" accept="image/*" onchange="loadCardImg(this)" style="font-size:13px"></div>
+    </div>
+
+    <div class="cardblock">
+      <div class="cbh">📄 Jo card active hai uska preview</div>
+      <img id="cf-preview" style="display:none;max-width:100%;border-radius:10px;margin-top:4px;border:1px solid var(--line)">
+      <div class="sub" id="cf-activemsg">Abhi koi card active nahi — Option A ya B se banao.</div>
+    </div>
+
+    <div class="cardblock">
+      <div class="cbh">Print PDF banao (free — browser me banega)</div>
+      <div class="pdfbtns">
+        <button class="btn mini" onclick="makePdf('tophalf')">A4 top-half</button>
+        <button class="btn mini" onclick="makePdf('8')">8 per sheet</button>
+        <button class="btn mini" onclick="makePdf('4')">4 per sheet + cut-lines</button>
+      </div>
+      <div class="sub" id="cf-pdfmsg" style="margin-top:8px"></div>
+    </div>
+    <canvas id="cf-canvas" style="display:none"></canvas>
+  </div>`;
+}
+
 function ratingsView(d, t) {
   const r = d.ratings, sum = r && r.summary, prods = (r && r.products) || [];
   const totalReviews = sum ? sum.total_reviews || 0 : 0;
@@ -702,7 +1000,7 @@ export function dashboardPage(d, env, lang) {
   </div>
   <div class="menu" id="menu"><div class="bg" onclick="toggleMenu(0)"></div><div class="panel">
     <div class="mh"><div class="mark" style="width:30px;height:30px;border-radius:8px;font-size:11px">KC</div><b>${t("menu")}</b></div>
-    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${stockMenu}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("settings", "⚙️", t("settings"))}
+    ${menuA("home", "🏠", t("home"), true)}${menuA("orders", "📦", t("orders"))}${stockMenu}${menuA("insights", "📊", t("insights"))}${menuA("ratings", "⭐", t("ratings"))}${menuA("cards", "🎁", "Gift Cards")}${menuA("settings", "⚙️", t("settings"))}
   </div></div>
   <div class="wrap">
   ${d.queued ? `<div class="banner demo"><b>Check shuru ho gaya.</b> 1–2 min mein naya data aayega.</div><script>setTimeout(()=>location.href="/",90000)</script>` : ""}
@@ -748,6 +1046,12 @@ export function dashboardPage(d, env, lang) {
     <div class="card">${ratingsView(d, t)}</div>
   </div>
 
+  <div class="sec" id="sec-cards">
+    <h2 style="margin:0 0 4px">🎁 Gift Cards</h2>
+    <div class="sub" style="margin-bottom:14px">Parcel me daalne wale thank-you / rating card — form bharo, PDF (top-half, 8-per-sheet, cut-lines) turant download.</div>
+    ${cardsView()}
+  </div>
+
   <div class="sec" id="sec-settings">
     <h2 style="margin:0 0 14px">${t("settings")}</h2>
     <div class="card pushbar" style="margin-bottom:14px">
@@ -774,7 +1078,7 @@ export function dashboardPage(d, env, lang) {
 </div>
 <div class="toast" id="toast"><b id="tT"></b><span id="tB"></span></div>
 <div class="ovl" id="ovl" onclick="if(event.target===this)closeOrder()"><div class="sheet" style="position:relative" id="sheet"></div></div>
-<script>window.KC={lastEvent:${Number(d.lastEvent?.id || 0)},lastRun:${Number(d.lastRun?.ts || 0)},devices:${Number(d.pushDevices || 0)}};</script>
+<script>window.KC={lastEvent:${Number(d.lastEvent?.id || 0)},lastRun:${Number(d.lastRun?.ts || 0)},devices:${Number(d.pushDevices || 0)},chatHist:${JSON.stringify((d.chatHistory || []).map((h) => ({ r: h.role, c: String(h.content || "") })))}};</script>
 <script>${CLIENT_JS}</script>`;
   return page("Kirana Club Tracker", body, false);
 }

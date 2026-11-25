@@ -213,16 +213,73 @@ async function route(req, env) {
     const newStatus = invStatus(units, threshold);
     await env.DB.prepare("UPDATE inventory SET units=?, min_qty=?, threshold=?, tracking=?, auto_oos=?, per_bundle=?, status=?, updated_at=? WHERE product_id=?")
       .bind(units, min_qty, threshold, tracking, auto_oos, per_bundle, newStatus, Date.now(), String(b.product_id)).run();
-    // Auto-sync ON + stock aa gaya (0→+) + portal par OOS hai → portal par wapas IN STOCK
+    // Single product ka portal sync (combo ka nahi — wo derived hai, recomputeCombos karega)
     let portal = null;
-    if (tracking && auto_oos && units > 0 && Number(cur.portal_oos) === 1) portal = await updateProductOOS(env, b.product_id, false).catch(() => null);
-    // Auto-sync ON + stock 0 ho gaya + portal in-stock hai → portal OOS
-    if (tracking && auto_oos && units <= 0 && Number(cur.portal_oos) === 0) portal = await updateProductOOS(env, b.product_id, true).catch(() => null);
+    if (!Number(cur.is_combo)) {
+      if (tracking && auto_oos && units > 0 && Number(cur.portal_oos) === 1) portal = await updateProductOOS(env, b.product_id, false).catch(() => null);
+      if (tracking && auto_oos && units <= 0 && Number(cur.portal_oos) === 0) portal = await updateProductOOS(env, b.product_id, true).catch(() => null);
+    }
+    // is product ke badalne se jude combos ka derived stock + portal recompute
+    await recomputeCombos(env).catch(() => {});
     return Response.json({ ok: true, portal });
+  }
+  if (p === "/api/stock/combo" && post) {
+    // Combo ka recipe set/update: { combo_id, is_combo, components:[{component_id, pcs}] }
+    const b = await req.json().catch(() => ({}));
+    if (!b.combo_id) return new Response("no combo", { status: 400 });
+    await ensureInventory(env);
+    const isCombo = b.is_combo ? 1 : 0;
+    await env.DB.prepare("UPDATE inventory SET is_combo=? WHERE product_id=?").bind(isCombo, String(b.combo_id)).run();
+    await env.DB.prepare("DELETE FROM combo_recipe WHERE combo_id=?").bind(String(b.combo_id)).run();
+    if (isCombo && Array.isArray(b.components)) {
+      for (const c of b.components) {
+        if (!c || !c.component_id || String(c.component_id) === String(b.combo_id)) continue;
+        await env.DB.prepare("INSERT OR REPLACE INTO combo_recipe(combo_id, component_id, pcs) VALUES(?,?,?)")
+          .bind(String(b.combo_id), String(c.component_id), Math.max(1, Math.round(Number(c.pcs) || 1))).run();
+      }
+    }
+    // combo ko track + auto-sync default ON (component OOS → combo portal OOS apne aap)
+    if (isCombo) await env.DB.prepare("UPDATE inventory SET tracking=1, auto_oos=1 WHERE product_id=?").bind(String(b.combo_id)).run();
+    await recomputeCombos(env).catch(() => {});
+    const info = await comboInfo(env, b.combo_id);
+    return Response.json({ ok: true, avail: info.avail, needSetup: info.needSetup });
   }
   if (p === "/api/notif/seen" && post) {
     const b = await req.json().catch(() => ({}));
     if (b.id != null) await setSetting(env, "notif_seen_id", String(Math.round(Number(b.id)) || 0));
+    return Response.json({ ok: true });
+  }
+  // ===== Assets (logo + card artwork) — D1 me base64 slot; replace/remove purana row hata deta hai =====
+  if (p === "/api/asset/list") {
+    await ensureInventory(env);
+    const r = await env.DB.prepare("SELECT slot, mime, w, h, bytes, updated_at FROM assets ORDER BY slot").all();
+    return Response.json({ assets: r.results || [] });
+  }
+  if (p === "/api/asset/get") {
+    await ensureInventory(env);
+    const slot = url.searchParams.get("slot") || "";
+    const row = await env.DB.prepare("SELECT data FROM assets WHERE slot=?").bind(slot).first();
+    if (!row || !row.data) return new Response("not found", { status: 404 });
+    return Response.json({ data: row.data });
+  }
+  if (p === "/api/asset/set" && post) {
+    const b = await req.json().catch(() => ({}));
+    const slot = String(b.slot || "").trim().slice(0, 40);
+    if (!slot || !b.data) return new Response("no data", { status: 400 });
+    const data = String(b.data);
+    if (data.length > 1200000) return Response.json({ ok: false, error: "too_big" }, { status: 413 });
+    await ensureInventory(env);
+    // INSERT OR REPLACE: PRIMARY KEY slot, toh purana data+row apne aap overwrite (delete+insert) ho jaata hai
+    await env.DB.prepare("INSERT OR REPLACE INTO assets(slot, mime, data, w, h, bytes, updated_at) VALUES(?,?,?,?,?,?,?)")
+      .bind(slot, String(b.mime || ""), data, Math.round(Number(b.w) || 0), Math.round(Number(b.h) || 0), data.length, Date.now()).run();
+    return Response.json({ ok: true, slot, bytes: data.length });
+  }
+  if (p === "/api/asset/del" && post) {
+    const b = await req.json().catch(() => ({}));
+    const slot = String(b.slot || "").trim();
+    if (!slot) return new Response("no slot", { status: 400 });
+    await ensureInventory(env);
+    await env.DB.prepare("DELETE FROM assets WHERE slot=?").bind(slot).run();
     return Response.json({ ok: true });
   }
   if (p === "/api/stock/instock" && post) {
@@ -230,6 +287,7 @@ async function route(req, env) {
     if (!b.product_id) return new Response("no product", { status: 400 });
     await ensureInventory(env);
     const portal = await updateProductOOS(env, b.product_id, false);
+    await recomputeCombos(env, [String(b.product_id)]).catch(() => {});
     return Response.json({ ok: true, portal });
   }
   if (p === "/api/stock/oos" && post) {
@@ -242,6 +300,7 @@ async function route(req, env) {
       await env.DB.prepare("UPDATE inventory SET units=0, status='oos', oos_at=NULL, updated_at=? WHERE product_id=?").bind(Date.now(), String(b.product_id)).run();
       await alertInventory(env, [{ ...inv, units: 0, after: 0, to: "oos" }]);
       const portal = await markOOSOnPortal(env, inv);
+      await recomputeCombos(env, [String(b.product_id)]).catch(() => {}); // component OOS → combos bhi update
       return Response.json({ ok: true, portal });
     }
     const when = Number(b.when);
@@ -267,7 +326,8 @@ async function route(req, env) {
     // NOTE: min_qty naye product ka (dst) hi rakhte hain — wo portal ke naye pack size se aata hai, purana nahi.
     await env.DB.prepare("UPDATE inventory SET units=?, per_bundle=?, threshold=?, tracking=?, auto_oos=?, status=?, updated_at=? WHERE product_id=?")
       .bind(units, per_bundle, threshold, tracking, auto_oos, status, Date.now(), to).run();
-    await env.DB.prepare("UPDATE inventory SET status='discontinued', tracking=0, updated_at=? WHERE product_id=?").bind(Date.now(), from).run();
+    // map ho gaya → purana 'merged' (discontinued se alag), taaki link dropdown + list me dobara na dikhe (#1)
+    await env.DB.prepare("UPDATE inventory SET status='merged', tracking=0, updated_at=? WHERE product_id=?").bind(Date.now(), from).run();
     // auto-sync on ho to portal bhi align
     let portal = null;
     if (tracking && auto_oos && units > 0 && Number(dst.portal_oos) === 1) portal = await updateProductOOS(env, to, false).catch(() => null);
@@ -541,6 +601,7 @@ async function loadDashboard(env) {
     stockAlert: JSON.parse((await getSetting(env, "stock_alert")) || "null"),
     notifSeenId: Number(await getSetting(env, "notif_seen_id")) || 0,
     suggestions: JSON.parse((await getSetting(env, "home_cards")) || "[]"),
+    chatHistory: ((await env.DB.prepare("SELECT role,content FROM chat_log WHERE ts>=? ORDER BY ts ASC").bind(Date.now() - 24 * 3600000).all().catch(() => ({ results: [] }))).results) || [],
   };
 }
 
@@ -549,10 +610,65 @@ async function ensureInventory(env) {
   await env.DB.batch([
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory (product_id TEXT PRIMARY KEY, sku TEXT, name TEXT, units INTEGER DEFAULT 0, min_qty INTEGER DEFAULT 1, threshold INTEGER DEFAULT 5, status TEXT DEFAULT 'in_stock', oos_at INTEGER, auto_oos INTEGER DEFAULT 0, tracking INTEGER DEFAULT 0, per_bundle INTEGER DEFAULT 0, portal_oos INTEGER DEFAULT 0, portal_seen INTEGER DEFAULT 0, updated_at INTEGER)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS inv_ledger (order_id TEXT, product_id TEXT, qty INTEGER, ts INTEGER, kind TEXT, PRIMARY KEY(order_id, product_id))`),
+    // Combo BOM: ek combo ke andar kaunse single products, aur per combo kitne pcs
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS combo_recipe (combo_id TEXT, component_id TEXT, pcs INTEGER DEFAULT 1, PRIMARY KEY(combo_id, component_id))`),
+    // Uploaded assets (logo, card artwork). 1 slot = 1 row; INSERT OR REPLACE purana apne aap hata deta hai.
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS assets (slot TEXT PRIMARY KEY, mime TEXT, data TEXT, w INTEGER, h INTEGER, bytes INTEGER, updated_at INTEGER)`),
   ]);
-  for (const col of ["per_bundle INTEGER DEFAULT 0", "portal_oos INTEGER DEFAULT 0", "portal_seen INTEGER DEFAULT 0", "parent_item_id TEXT"]) {
+  for (const col of ["per_bundle INTEGER DEFAULT 0", "portal_oos INTEGER DEFAULT 0", "portal_seen INTEGER DEFAULT 0", "parent_item_id TEXT", "is_combo INTEGER DEFAULT 0"]) {
     await env.DB.prepare(`ALTER TABLE inventory ADD COLUMN ${col}`).run().catch(() => {});
   }
+}
+// Combo availability derive karo: min over components of floor(component units / pcs-per-combo).
+// Return: { avail, tracked, blockers:[{id,name,units,pcs,makes}], needSetup, components:[...] }
+async function comboInfo(env, comboId, invMap) {
+  const recipe = (await env.DB.prepare("SELECT * FROM combo_recipe WHERE combo_id=?").bind(String(comboId)).all()).results;
+  if (!recipe.length) return { avail: 0, empty: true, components: [], blockers: [], needSetup: true };
+  const comps = [];
+  let avail = Infinity, needSetup = false;
+  for (const r of recipe) {
+    const c = invMap ? invMap[String(r.component_id)] : await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(String(r.component_id)).first();
+    const pcs = Math.max(1, Number(r.pcs) || 1);
+    const tracked = c && Number(c.tracking) === 1;
+    const units = c ? Number(c.units) || 0 : 0;
+    const makes = tracked ? Math.floor(units / pcs) : null; // untracked = unknown
+    if (!c || !tracked) needSetup = true; else avail = Math.min(avail, makes);
+    comps.push({ id: String(r.component_id), name: c ? (c.name || c.sku) : r.component_id, pcs, units, tracked: !!tracked, makes, status: c ? c.status : null });
+  }
+  if (!isFinite(avail)) avail = 0;
+  // blocker = wo components jo sabse kam combos bana paate (ya OOS)
+  const blockers = comps.filter((x) => x.tracked && x.makes <= avail);
+  return { avail, components: comps, blockers, needSetup, empty: false };
+}
+// Saare combos ka derived units/status recompute karo; auto-sync ON ho to portal OOS/in-stock bhi.
+// Sirf un combos ko chhuo jinke component abhi badle (changedIds), warna saare.
+async function recomputeCombos(env, changedIds) {
+  const combos = (await env.DB.prepare("SELECT * FROM inventory WHERE is_combo=1").all()).results;
+  if (!combos.length) return [];
+  const allInv = (await env.DB.prepare("SELECT * FROM inventory").all()).results;
+  const invMap = {}; for (const r of allInv) invMap[String(r.product_id)] = r;
+  const changed = changedIds ? new Set(changedIds.map(String)) : null;
+  const transitions = [];
+  for (const combo of combos) {
+    const info = await comboInfo(env, combo.product_id, invMap);
+    if (changed) { // sirf tab recompute jab is combo ka koi component badla ho
+      const touches = info.components.some((c) => changed.has(c.id));
+      if (!touches) continue;
+    }
+    if (info.needSetup || info.empty) continue; // adhoora combo — status nahi badalte, UI warning dega
+    const before = Number(combo.units) || 0, os = combo.status;
+    const after = info.avail;
+    const ns = after <= 0 ? "oos" : invStatus(after, combo.threshold);
+    await env.DB.prepare("UPDATE inventory SET units=?, status=?, updated_at=? WHERE product_id=?").bind(after, ns, Date.now(), combo.product_id).run();
+    if (ns !== os && (ns === "low" || ns === "oos")) transitions.push({ ...combo, before, after, to: ns, _combo: true });
+    // auto-sync: combo OOS/in-stock portal par (component ki wajah se)
+    if (Number(combo.tracking) === 1 && Number(combo.auto_oos) === 1) {
+      const wantOos = after <= 0;
+      if (wantOos && Number(combo.portal_oos) !== 1) await updateProductOOS(env, combo.product_id, true).catch(() => {});
+      else if (!wantOos && Number(combo.portal_oos) === 1) await updateProductOOS(env, combo.product_id, false).catch(() => {});
+    }
+  }
+  return transitions;
 }
 // Portal par product ko OOS (true) ya in-stock (false) mark karo — captured endpoint
 async function updateProductOOS(env, productID, isOos) {
@@ -633,9 +749,12 @@ async function applyInventoryForNewOrders(env, ids) {
   const already = new Set((await env.DB.prepare("SELECT DISTINCT order_id FROM inv_ledger").all()).results.map((r) => String(r.order_id)));
   const now = Date.now();
   const transitions = [];
+  const changedComponents = new Set();
   for (const id of ids) {
     if (already.has(String(id))) continue;
     const lines = await fetchOrderLines(env, id).catch(() => []);
+    // need map: ek order me har component ka total consume (combo = components me expand)
+    const need = {};
     for (const ln of lines) {
       let inv = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(ln.product_id).first();
       if (!inv) {
@@ -646,28 +765,50 @@ async function applyInventoryForNewOrders(env, ids) {
       }
       if (inv.name !== ln.name && ln.name)
         await env.DB.prepare("UPDATE inventory SET name=? WHERE product_id=?").bind(ln.name, ln.product_id).run();
-      if (!inv.tracking) continue; // jab tak user units set na kare, ghatao mat
-      const before = Number(inv.units) || 0;
-      const after = before - (Number(ln.qty) || 0);
+      if (Number(inv.is_combo) === 1) {
+        // COMBO order: components me expand — har component = pcs-per-combo × combo qty
+        const recipe = (await env.DB.prepare("SELECT * FROM combo_recipe WHERE combo_id=?").bind(ln.product_id).all()).results;
+        for (const r of recipe) {
+          const comp = await env.DB.prepare("SELECT tracking FROM inventory WHERE product_id=?").bind(String(r.component_id)).first();
+          if (!comp || Number(comp.tracking) !== 1) continue; // untracked component ghatao mat
+          need[String(r.component_id)] = (need[String(r.component_id)] || 0) + Math.max(1, Number(r.pcs) || 1) * (Number(ln.qty) || 1);
+        }
+      } else {
+        if (!inv.tracking) continue; // jab tak user units set na kare, ghatao mat
+        need[ln.product_id] = (need[ln.product_id] || 0) + (Number(ln.qty) || 0);
+      }
+    }
+    // ab har component par ek baar decrement (combo + single dono isi pool se)
+    for (const [pid, qty] of Object.entries(need)) {
+      const inv = await env.DB.prepare("SELECT * FROM inventory WHERE product_id=?").bind(pid).first();
+      if (!inv || !inv.tracking) continue;
+      const before = Number(inv.units) || 0, after = before - qty;
       const os = invStatus(before, inv.threshold), ns = invStatus(after, inv.threshold);
-      await env.DB.prepare("UPDATE inventory SET units=?, status=?, updated_at=? WHERE product_id=?").bind(after, ns, now, ln.product_id).run();
-      await env.DB.prepare("INSERT OR IGNORE INTO inv_ledger(order_id,product_id,qty,ts,kind) VALUES(?,?,?,?,'consume')").bind(String(id), ln.product_id, Number(ln.qty) || 0, now).run();
+      await env.DB.prepare("UPDATE inventory SET units=?, status=?, updated_at=? WHERE product_id=?").bind(after, ns, now, pid).run();
+      await env.DB.prepare("INSERT OR IGNORE INTO inv_ledger(order_id,product_id,qty,ts,kind) VALUES(?,?,?,?,'consume')").bind(String(id), pid, qty, now).run();
+      changedComponents.add(pid);
       if (ns !== os && (ns === "low" || ns === "oos")) transitions.push({ ...inv, before, after, to: ns });
     }
   }
-  if (transitions.length) await alertInventory(env, transitions);
-  return transitions;
+  // component badle → un combos ko recompute jinme ye hain (derived stock + portal auto-sync)
+  const comboTrans = await recomputeCombos(env, [...changedComponents]);
+  const all = transitions.concat(comboTrans);
+  if (all.length) await alertInventory(env, all);
+  return all;
 }
 // Cancel hone par units wapas (maal dispatch nahi hua)
 async function restoreInventory(env, id) {
   await ensureInventory(env);
   const rows = (await env.DB.prepare("SELECT product_id,qty FROM inv_ledger WHERE order_id=? AND kind='consume'").bind(String(id)).all()).results;
+  const restored = [];
   for (const r of rows) {
     await env.DB.prepare("UPDATE inventory SET units=units+?, updated_at=? WHERE product_id=?").bind(Number(r.qty) || 0, Date.now(), r.product_id).run();
     await env.DB.prepare("UPDATE inv_ledger SET kind='restored' WHERE order_id=? AND product_id=?").bind(String(id), r.product_id).run();
     const inv = await env.DB.prepare("SELECT units,threshold FROM inventory WHERE product_id=?").bind(r.product_id).first();
     if (inv) await env.DB.prepare("UPDATE inventory SET status=? WHERE product_id=?").bind(invStatus(inv.units, inv.threshold), r.product_id).run();
+    restored.push(r.product_id);
   }
+  if (restored.length) await recomputeCombos(env, restored); // combo stock bhi wapas
 }
 // Scheduled OOS (user ne time set kiya) + threshold cross — cron me check
 async function checkScheduledOOS(env) {
@@ -681,6 +822,7 @@ async function checkScheduledOOS(env) {
     // scheduled OOS = explicit intent, portal par hamesha mark karo
     await updateProductOOS(env, inv.product_id, true).catch(() => {});
   }
+  if (due.length) await recomputeCombos(env, due.map((x) => x.product_id)).catch(() => {});
   if (trans.length) await alertInventory(env, trans);
 }
 // Alert: mail + push + in-app banner + event; aur gated portal auto-OOS
@@ -703,7 +845,8 @@ async function alertInventory(env, transitions) {
   }
   await setSetting(env, "stock_alert", JSON.stringify({ ts: now, oos: oos.map((t) => t.name || t.sku), low: low.map((t) => t.name || t.sku) }));
   // Auto-sync ON ho to portal par bhi OOS mark karo (glitch-guard: ye sirf real order-decrement se aata hai)
-  for (const t of oos) if (t.auto_oos) await updateProductOOS(env, t.product_id, true).catch(() => {});
+  // _combo transitions ka portal sync recomputeCombos pehle hi kar chuka — yahan skip
+  for (const t of oos) if (t.auto_oos && !t._combo) await updateProductOOS(env, t.product_id, true).catch(() => {});
 }
 // Low-stock DIGEST — din me 2-3 baar (10/15/20 IST), har order pe nahi
 async function maybeSendLowDigest(env) {
@@ -843,6 +986,19 @@ async function inventoryList(env) {
   await ensureInventory(env);
   const rows = (await env.DB.prepare("SELECT * FROM inventory ORDER BY CASE status WHEN 'oos' THEN 0 WHEN 'low' THEN 1 WHEN 'discontinued' THEN 3 ELSE 2 END, tracking DESC, name").all()).results;
   const alerts = rows.filter((r) => r.tracking && r.status !== "discontinued" && (r.status === "oos" || r.status === "low")).length;
+  // combo data: har combo ka derived info; aur har component ko batao wo kaunse combos me hai
+  const invMap = {}; for (const r of rows) invMap[String(r.product_id)] = r;
+  const recipes = (await env.DB.prepare("SELECT * FROM combo_recipe").all()).results;
+  const byCombo = {}, inCombos = {};
+  for (const r of recipes) {
+    (byCombo[String(r.combo_id)] = byCombo[String(r.combo_id)] || []).push(r);
+    (inCombos[String(r.component_id)] = inCombos[String(r.component_id)] || []).push(String(r.combo_id));
+  }
+  for (const row of rows) {
+    if (Number(row.is_combo) === 1) row._combo = await comboInfo(env, row.product_id, invMap);
+    const inc = inCombos[String(row.product_id)];
+    if (inc) row._inCombos = inc.map((cid) => (invMap[cid] && (invMap[cid].name || invMap[cid].sku)) || cid);
+  }
   return { rows, alerts };
 }
 
@@ -1200,7 +1356,13 @@ function buildBotContext(d) {
   L.push("BUSINESS SIGNALS (derived):");
   L.push(`- Total tracked orders: ${orders.length}. Delivered ${delivered}, NDR ${ndr}, RTO ${rto}, Cancelled ${cancelled}. COD orders: ${codN}/${orders.length}.`);
   L.push(`- Repeat customers (same naam + same address/pincode): ${repeat.length}${repeat.length ? " — " + repeat.slice(0, 5).map(([, arr]) => `${arr[0].customer} (${arr.length} orders, ${pinOf(arr[0]) || arr[0].city})`).join("; ") : ". Dhyaan: alag pincode wale same-naam alag customer hain."}`);
-  if (topCities.length) L.push(`- Top areas: ${topCities.map(([ci, n]) => `${ci}(${n})`).join(", ")}.`);
+  if (topCities.length) L.push(`- Top order areas: ${topCities.map(([ci, n]) => `${ci}(${n})`).join(", ")}.`);
+  // RETURN/RTO/NDR HOTSPOT: kaunse area/pincode me sabse zyada return — geographic
+  const badOf = (o) => /rto|ndr|cancel|return|reject|undeliver/i.test(o.status || "");
+  const areaStats = {};
+  for (const o of orders) { const dt = detOf(o); const ar = (dt.city || o.city || "") + (dt.pincode ? " " + dt.pincode : ""); const key = ar.trim(); if (!key) continue; const a = areaStats[key] = areaStats[key] || { tot: 0, bad: 0 }; a.tot++; if (badOf(o)) a.bad++; }
+  const returnAreas = Object.entries(areaStats).filter(([, s]) => s.bad > 0).sort((a, b) => b[1].bad - a[1].bad || (b[1].bad / b[1].tot) - (a[1].bad / a[1].tot)).slice(0, 6);
+  if (returnAreas.length) L.push(`- RETURN/RTO/NDR HOTSPOT (sabse zyada return/cancel yahan — yahan COD confirm/verify karo): ${returnAreas.map(([ar, s]) => `${ar} = ${s.bad}/${s.tot} return (${Math.round(s.bad / s.tot * 100)}%)`).join("; ")}.`);
 
   const inv = (d.inventory?.rows || []);
   const oosNow = inv.filter((r) => Number(r.portal_oos) === 1 || (r.tracking && r.status === "oos"));
@@ -1255,18 +1417,25 @@ async function askBot(env, q) {
   try {
     const d = await loadDashboard(env);
     const ctx = buildBotContext(d);
-    const sys = `Tum Anagh Masale ke business analyst + Kirana Club seller advisor ho. Neeche is seller ka POORA live data hai. Tumhe is data ko samajh kar, sochkar, har tarah ke sawaal ka sahi, practical jawab dena hai — chahe simple ho (kitne orders, kaunsa stock) ya business advice (sale kaise badhe, kya improve karun).
+    const sys = `Tum Anagh Masale ke CO-FOUNDER + CMO + business analyst ho — ek no-nonsense advisor jo neeche diye is seller ke POORA live data ko padhkar CONCRETE, numbers-wale, is business par lagu advice deta hai. Generic gyaan ya hawa-hawai baat nahi.
 
-Kaam karne ka tareeka:
-- Sirf is DATA ko base banao. Jo number DATA me hai wahi do; jo bilkul nahi hai use saaf bolo, galat number mat banao.
-- Count/total/average khud ginti/jod ke EXACT do (paise ₹ me). Dhyaan se jodo.
-- Business sawaal (jaise "sale kaise badhaun", "kya theek karun", "kya dikkat hai") par — DATA ke BUSINESS SIGNALS, OOS products, NDR/RTO, low ratings, weak sellers, Kirana ke suggestions, repeat customers, top areas — in sab ko dekhkar 3-5 concrete, numbers-wale, actionable points do jo is seller par lagu hote hain (generic gyaan nahi). Jaise "X out of stock hai, usse roz ki sale ruk rahi hai — restock karo", "NDR Y hai, COD confirm karo".
-- "stock" = STOCK section; kisi product ke orders/units = PRODUCT-WISE SALES; aaj/kal ki sale = ORDERS/METRICS.
-- Product naam poora match karo (sirf "masala" se koi bhi mat pakdo).
-- Tone: seedha, practical, Hinglish (user jis bhasha me poochhe us hisaab se). Zaroorat ho tabhi points/line-break. Koi jhooth ya khokhli tareef nahi.
+Baat karne ka tareeka:
+- Ye ek CHAINED baat-cheet hai — upar (agar hai to) pichhle 24 ghante ki conversation di gayi hai. Pichhle sawaal/jawab yaad rakho, usi dhaage me aage badho, cheezein dohrao mat. "wo", "usko", "pehle wala", "aur batao" jaise reference samjho.
+- Sirf DATA se bolo. Jo number DATA me hai wahi do; jo nahi hai saaf bolo, banao mat. Count/total/average khud EXACT jodo (₹ me, dhyaan se).
+- Business sawaal (sale kaise badhe, kya theek karun, kahan dikkat hai) par: DATA ke BUSINESS SIGNALS, RETURN/RTO HOTSPOT areas, OOS products, NDR/RTO, low ratings, weak/top sellers, repeat customers, Kirana suggestions — in sab se 3-5 CONCRETE actionable points. Jaise "X OOS hai → roz sale ruk rahi, restock", "[Area] me Y% return → waha COD confirm/verify karo", "Z slow seller → combo me daal ke push karo".
+- "Return/RTO area kahan sabse zyada" poochhe → RETURN HOTSPOT section se area + % do.
+- Repeat customer HAMESHA naam + pincode dono se (sirf naam se nahi — alag pincode alag customer).
+- Product naam poora match karo (sirf "masala" se koi bhi mat pakdo). "stock"=STOCK section, product ke orders/units=PRODUCT-WISE SALES, aaj/kal sale=ORDERS/METRICS.
+- Tone: seedha, practical, Hinglish (user ki bhasha me). Koi khokhli tareef ya jhooth nahi. Points/line-break tabhi jab zaroori.
 
 ${ctx}`;
-    const messages = [{ role: "system", content: sys }, { role: "user", content: question }];
+    // 24-ghante conversation memory (chaining) — D1 me store, 24h se purana auto-clear
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_log (ts INTEGER, role TEXT, content TEXT)`).run().catch(() => {});
+    const since = Date.now() - 24 * 3600000;
+    await env.DB.prepare("DELETE FROM chat_log WHERE ts < ?").bind(since).run().catch(() => {});
+    const hist = ((await env.DB.prepare("SELECT role,content FROM chat_log WHERE ts>=? ORDER BY ts ASC").bind(since).all().catch(() => ({ results: [] }))).results) || [];
+    const recent = hist.slice(-12).map((h) => ({ role: h.role === "assistant" ? "assistant" : "user", content: String(h.content || "") }));
+    const messages = [{ role: "system", content: sys }, ...recent, { role: "user", content: question }];
     const cached = await getSetting(env, "ai_model_ok");
     const candidates = [env.AI_MODEL, cached,
       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
@@ -1279,7 +1448,12 @@ ${ctx}`;
       try {
         const r = await env.AI.run(model, { messages, max_tokens: 900, temperature: 0.3 });
         const clean = String((r && (r.response || r.result)) || (typeof r === "string" ? r : "")).trim();
-        if (clean) { if (cached !== model) await setSetting(env, "ai_model_ok", model); return clean; }
+        if (clean) {
+          if (cached !== model) await setSetting(env, "ai_model_ok", model);
+          await env.DB.prepare("INSERT INTO chat_log(ts,role,content) VALUES(?,'user',?)").bind(Date.now(), question).run().catch(() => {});
+          await env.DB.prepare("INSERT INTO chat_log(ts,role,content) VALUES(?,'assistant',?)").bind(Date.now() + 1, clean).run().catch(() => {});
+          return clean;
+        }
       } catch (e) { /* agla model try karo */ }
     }
     return askBotRules(env, q);
@@ -1629,7 +1803,7 @@ self.addEventListener("push", (e) => {
     await self.registration.showNotification(n.title, quiet
       ? { body: n.body, tag: "kc-quiet", renotify: false, silent: true, icon: "/icon.png", badge: "/icon.png", data: { url: "/" } }
       : { body: n.body, tag: "kc-" + n.id, renotify: true, icon: "/icon.png", badge: "/icon.png",
-          vibrate: order ? [300, 120, 300, 120, 700] : [200, 100, 200], requireInteraction: order, data: { url: "/" } });
+          vibrate: order ? [300, 120, 300, 120, 700] : [200, 100, 200], requireInteraction: false, data: { url: "/" } });
     const cs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     cs.forEach((c) => c.postMessage({ type: "kc-notify", n }));
   })());
